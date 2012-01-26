@@ -81,6 +81,15 @@
 	</dependency>
 </dependencies>
 <repositories>
+	<repository>
+		<id>central</id>
+		<name>Maven Repository Switchboard</name>
+		<layout>default</layout>
+		<url>http://repo1.maven.org/maven2</url>
+		<snapshots>
+			<enabled>false</enabled>
+		</snapshots>
+    </repository>
 	<repository>  
 		<id>maven-restlet</id>  
 		<name>Public online Restlet repository</name>  
@@ -90,7 +99,7 @@
         <snapshots>
 			<enabled>false</enabled>
         </snapshots>
-        <id>central</id>
+        <id>artifactory</id>
         <name>repo</name>
         <url>http://maven.etl.luc.edu/artifactory/repo</url>
 	</repository> 
@@ -121,6 +130,26 @@
 </reporting>
 <build>
 	<plugins>
+	 <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>appassembler-maven-plugin</artifactId>
+                <version>1.1.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals><goal>assemble</goal></goals>
+                        <configuration>
+                            <assembleDirectory>target</assembleDirectory>
+                            <programs>
+                                <program>
+                                    <mainClass>org.wattdepot.server.Server</mainClass>
+                                    <name>webapp</name>
+                                </program>
+                            </programs>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
 	<plugin>
 		<groupId>org.codehaus.mojo</groupId>
         <artifactId>findbugs-maven-plugin</artifactId>

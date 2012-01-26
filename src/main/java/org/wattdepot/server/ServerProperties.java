@@ -125,7 +125,8 @@ public class ServerProperties {
     properties.setProperty(LOGGING_LEVEL_KEY, "INFO");
     properties.setProperty(RESTLET_LOGGING_KEY, FALSE);
     properties.setProperty(SMTP_HOST_KEY, "mail.hawaii.edu");
-    properties.setProperty(PORT_KEY, "8182");
+    properties.setProperty(PORT_KEY, System.getenv("PORT"));
+    //properties.setProperty(PORT_KEY, "8182");
     properties.setProperty(GVIZ_PORT_KEY, "8184");
     properties.setProperty(TEST_DOMAIN_KEY, "example.com");
     properties.setProperty(TEST_INSTALL_KEY, FALSE);
