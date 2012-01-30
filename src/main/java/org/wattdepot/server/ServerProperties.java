@@ -121,7 +121,8 @@ public class ServerProperties {
     properties.setProperty(DB_DIR_KEY, serverHome + "/db");
     properties.setProperty(DB_SNAPSHOT_KEY, serverHome + "/db-snapshot");
     properties.setProperty(DB_IMPL_KEY, "org.wattdepot.server.db.derby.DerbyStorageImplementation");
-    properties.setProperty(HOSTNAME_KEY, "localhost");
+    properties.setProperty(HOSTNAME_KEY, "wattdepot.herokuapp.com");
+    //properties.setProperty(HOSTNAME_KEY, "localhost");
     properties.setProperty(LOGGING_LEVEL_KEY, "INFO");
     properties.setProperty(RESTLET_LOGGING_KEY, FALSE);
     properties.setProperty(SMTP_HOST_KEY, "mail.hawaii.edu");
@@ -134,9 +135,11 @@ public class ServerProperties {
     properties.setProperty(TEST_ADMIN_PASSWORD_KEY, defaultAdmin);
     properties.setProperty(TEST_DB_DIR_KEY, serverHome + "/testdb");
     properties.setProperty(TEST_DB_SNAPSHOT_KEY, serverHome + "/testdb-snapshot");
-    properties.setProperty(TEST_PORT_KEY, "8183");
+    properties.setProperty(TEST_PORT_KEY, System.getenv("PORT")); 
+    //properties.setProperty(TEST_PORT_KEY, "8183");
     properties.setProperty(TEST_GVIZ_PORT_KEY, "8185");
-    properties.setProperty(TEST_HOSTNAME_KEY, "localhost");
+    properties.setProperty(TEST_HOSTNAME_KEY, "wattdepot.herokuapp.com");
+    //properties.setProperty(TEST_HOSTNAME_KEY, "localhost");
 
     FileInputStream stream = null;
     try {
@@ -270,7 +273,8 @@ public class ServerProperties {
    * @return The fully qualified host name.
    */
   public String getFullHost() {
-    return "http://" + get(HOSTNAME_KEY) + ":" + get(PORT_KEY) + "/" + get(CONTEXT_ROOT_KEY) + "/";
+    return "http://" + get(HOSTNAME_KEY) + "/" + get(CONTEXT_ROOT_KEY) + "/";
+    //return "http://" + get(HOSTNAME_KEY) + ":" + get(PORT_KEY) + "/" + get(CONTEXT_ROOT_KEY) + "/";
   }
 
   /**
