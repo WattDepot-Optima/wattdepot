@@ -79,6 +79,11 @@
 		<artifactId>jamod</artifactId>
 		<version>1.2</version>
 	</dependency>
+	<dependency>
+		<groupId>org.jacoco</groupId>
+		<artifactId>org.jacoco.core</artifactId>
+		<version>0.5.5.201112152213</version>
+	</dependency> 
 </dependencies>
 <repositories>
 	<repository>
@@ -105,73 +110,112 @@
 	</repository> 
 </repositories>
 <reporting>
-<plugins>
+	<plugins>
 	<plugin>
 		<groupId>org.codehaus.mojo</groupId>
-        <artifactId>findbugs-maven-plugin</artifactId>
-        <version>1.2</version>
-    </plugin>
-	<plugin>
-		<groupId>org.jacoco</groupId>
-		<artifactId>jacoco-maven-plugin</artifactId>
-		<version>0.5.7-SNAPSHOT</version>
+		<artifactId>findbugs-maven-plugin</artifactId>
+		<version>2.4.0</version>
+		<configuration>
+		    <excludeFilterFile>src/main/resources/xml/configfiles/hackystat.findbugs.exclude.xml</excludeFilterFile>
+			<excludes>**/jaxb/**, **/tinker/**</excludes>
+		</configuration>
 	</plugin>
-	 <plugin>
+	<plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-checkstyle-plugin</artifactId>
         <version>2.8</version>
+		<configuration>
+          <configLocation>src/main/resources/xml/configfiles/wattdepot.checkstyle.xml</configLocation>
+		  <excludes>**/jaxb/**, **/tinker/**</excludes>
+        </configuration>
     </plugin>
 	<plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-pmd-plugin</artifactId>
         <version>2.6</version>
-     </plugin>
-</plugins>
+		<reportSets>
+          <reportSet>
+            <reports>
+              <report>pmd</report>
+              <report>cpd</report>
+            </reports>
+          </reportSet>
+        </reportSets>
+		<configuration>
+			<ruleset>src/main/resources/xml/configfiles/hackystat.pmd.xml</ruleset>
+			<linkXref>true</linkXref>
+			<sourceEncoding>utf-8</sourceEncoding>
+			<minimumTokens>100</minimumTokens>
+			<targetJdk>1.6</targetJdk>
+			<excludes>
+				<exclude>**/tinker/**</exclude>
+				<exclude>**/jaxb/**</exclude>
+			</excludes>
+		</configuration>
+    </plugin>
+    <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>javancss-maven-plugin</artifactId>
+        <version>2.0-beta-2</version>
+    </plugin>
+	<plugin>
+		<groupId>org.jacoco</groupId>
+		<artifactId>jacoco-maven-plugin</artifactId>
+		<version>0.5.5.201112152213</version>
+	</plugin>
+	</plugins>
 </reporting>
 <build>
 	<plugins>
-	 <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>appassembler-maven-plugin</artifactId>
-                <version>1.1.1</version>
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-                        <goals><goal>assemble</goal></goals>
-                        <configuration>
-                            <assembleDirectory>target</assembleDirectory>
-                            <programs>
-                                <program>
-                                    <mainClass>org.wattdepot.server.Server</mainClass>
-                                    <name>webapp</name>
-                                </program>
-                            </programs>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
+	<plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>appassembler-maven-plugin</artifactId>
+        <version>1.1.1</version>
+        <executions>
+            <execution>
+                <phase>package</phase>
+                <goals><goal>assemble</goal></goals>
+                <configuration>
+                    <assembleDirectory>target</assembleDirectory>
+                    <programs>
+                        <program>
+                            <mainClass>org.wattdepot.server.Server</mainClass>
+                            <name>webapp</name>
+                        </program>
+                    </programs>
+                </configuration>
+            </execution>
+        </executions>
+    </plugin>
 	<plugin>
 		<groupId>org.codehaus.mojo</groupId>
-        <artifactId>findbugs-maven-plugin</artifactId>
-        <version>1.2</version>
+		<artifactId>findbugs-maven-plugin</artifactId>
+		<version>2.4.0</version>
+		<configuration>
+			<excludes>**/jaxb/**, **/tinker/**</excludes>
+		</configuration>
 		<executions>
 			<execution>
 				<phase>verify</phase>
+				<goals>
+					<goal>check</goal> 
+				</goals>
 			</execution>
 		</executions>
     </plugin>
 	<plugin>
-		<groupId>org.jacoco</groupId>
-		<artifactId>jacoco-maven-plugin</artifactId>
-		<version>0.5.7-SNAPSHOT</version>
-	</plugin>
-	 <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-checkstyle-plugin</artifactId>
         <version>2.8</version>
+		<configuration>
+			<excludes>**/jaxb/**, **/tinker/**</excludes>
+		</configuration>
 		<executions>
 			<execution>
 				<phase>verify</phase>
+				<goals>
+					<goal>check</goal> 
+				</goals>
 			</execution>
 		</executions>
     </plugin>
@@ -182,8 +226,21 @@
 		<executions>
 			<execution>
 				<phase>verify</phase>
+				<goals>
+					<goal>check</goal> 
+				</goals>
 			</execution>
 		</executions>
+		<configuration>
+			<linkXref>true</linkXref>
+			<sourceEncoding>utf-8</sourceEncoding>
+			<minimumTokens>100</minimumTokens>
+			<targetJdk>1.6</targetJdk>
+			<excludes>
+				<exclude>**/tinker/**</exclude>
+				<exclude>**/jaxb/**</exclude>
+			</excludes>
+		</configuration>
      </plugin>
      <plugin>
         <groupId>org.apache.maven.plugins</groupId>

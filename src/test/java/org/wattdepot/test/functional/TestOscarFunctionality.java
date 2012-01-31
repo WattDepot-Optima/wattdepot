@@ -523,7 +523,7 @@ public class TestOscarFunctionality extends ServerTestHelper {
 
     sourceName = "SIM_KAHE";
     expectedOutput =
-        "Subsources: [http://localhost:8183/wattdepot/sources/SIM_KAHE_1, http://localhost:8183/wattdepot/sources/SIM_KAHE_2, http://localhost:8183/wattdepot/sources/SIM_KAHE_3, http://localhost:8183/wattdepot/sources/SIM_KAHE_4, http://localhost:8183/wattdepot/sources/SIM_KAHE_5, http://localhost:8183/wattdepot/sources/SIM_KAHE_6, http://localhost:8183/wattdepot/sources/SIM_KAHE_7]"
+        "Subsources: ["+server.getHostName()+"sources/SIM_KAHE_1, "+server.getHostName()+"sources/SIM_KAHE_2, "+server.getHostName()+"sources/SIM_KAHE_3, "+server.getHostName()+"sources/SIM_KAHE_4, "+server.getHostName()+"sources/SIM_KAHE_5, "+server.getHostName()+"sources/SIM_KAHE_6, "+server.getHostName()+"sources/SIM_KAHE_7]"
             + lineSep
             + "Description: Virtual resource for all Kahe power plants."
             + lineSep
@@ -545,7 +545,7 @@ public class TestOscarFunctionality extends ServerTestHelper {
 
     sourceName = "SIM_OAHU_GRID";
     expectedOutput =
-        "Subsources: [http://localhost:8183/wattdepot/sources/SIM_KAHE, http://localhost:8183/wattdepot/sources/SIM_WAIAU, http://localhost:8183/wattdepot/sources/SIM_HONOLULU, http://localhost:8183/wattdepot/sources/SIM_IPP]"
+        "Subsources: ["+server.getHostName()+"sources/SIM_KAHE, "+server.getHostName()+"sources/SIM_WAIAU, "+server.getHostName()+"sources/SIM_HONOLULU, "+server.getHostName()+"sources/SIM_IPP]"
             + lineSep
             + "Description: Virtual resource for all Oahu power plants."
             + lineSep
