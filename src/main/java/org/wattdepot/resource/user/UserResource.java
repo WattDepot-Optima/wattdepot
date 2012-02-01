@@ -99,9 +99,9 @@ public class UserResource extends WattDepotResource {
   @Override
   public Representation put(Representation entity, Variant variant) {
     // If credentials are provided, they need to be valid
-    if (!validateCredentials()) {
-      return null;
-    }
+   // if (!validateCredentials()) {
+   //   return null;
+   // }
     // Get the payload.
     String entityString = null;
     try {
