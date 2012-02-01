@@ -337,6 +337,18 @@ public class WattDepotResource extends ServerResource {
     Unmarshaller unmarshaller = sourceJaxbContext.createUnmarshaller();
     return (Source) unmarshaller.unmarshal(new StringReader(xmlString));
   }
+  
+  /**
+   * Takes a String encoding of a User in XML format and converts it to an instance.
+   * 
+   * @param xmlString The XML string representing a User.
+   * @return The corresponding User instance.
+   * @throws JAXBException If problems occur during unmarshalling.
+   */
+  public User makeUser(String xmlString) throws JAXBException {
+    Unmarshaller unmarshaller = userJaxbContext.createUnmarshaller();
+    return (User) unmarshaller.unmarshal(new StringReader(xmlString));
+  }
 
   /**
    * Returns an XML string representation of a SensorDataIndex containing all the SensorData for the
