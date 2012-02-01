@@ -143,8 +143,8 @@ public class ServerProperties {
     properties.setProperty(TEST_INSTALL_KEY, FALSE);
     properties.setProperty(TEST_ADMIN_EMAIL_KEY, defaultAdmin);
     properties.setProperty(TEST_ADMIN_PASSWORD_KEY, defaultAdmin);
-    properties.setProperty(TEST_DB_DIR_KEY, serverHome + "/testdb");
-    properties.setProperty(TEST_DB_SNAPSHOT_KEY, serverHome + "/testdb-snapshot");
+    properties.setProperty(TEST_DB_DIR_KEY, serverHome + "/db");
+    properties.setProperty(TEST_DB_SNAPSHOT_KEY, serverHome + "/db-snapshot");
     properties.setProperty(TEST_GVIZ_PORT_KEY, "8185");
     
 
