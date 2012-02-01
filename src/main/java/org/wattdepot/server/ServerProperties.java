@@ -120,24 +120,25 @@ public class ServerProperties {
     properties.setProperty(GVIZ_CONTEXT_ROOT_KEY, "gviz");
     properties.setProperty(DB_DIR_KEY, serverHome + "/db");
     properties.setProperty(DB_SNAPSHOT_KEY, serverHome + "/db-snapshot");
-    properties.setProperty(DB_IMPL_KEY, "org.wattdepot.server.db.derby.DerbyStorageImplementation");
+    //properties.setProperty(DB_IMPL_KEY, "org.wattdepot.server.db.derby.DerbyStorageImplementation");
+    properties.setProperty(DB_IMPL_KEY, "org.wattdepot.server.db.memory.MemoryStorageImplementation");
     properties.setProperty(LOGGING_LEVEL_KEY, "INFO");
     properties.setProperty(RESTLET_LOGGING_KEY, FALSE);
     properties.setProperty(SMTP_HOST_KEY, "mail.hawaii.edu");
-    
+    properties.setProperty(HOSTNAME_KEY, "wattdepot.herokuapp.com");
+    //properties.setProperty(HOSTNAME_KEY, "localhost");
+       
     try {
       properties.setProperty(PORT_KEY, System.getenv("PORT"));
       properties.setProperty(TEST_PORT_KEY, System.getenv("PORT"));
-      properties.setProperty(HOSTNAME_KEY, "wattdepot.herokuapp.com");
-      properties.setProperty(TEST_HOSTNAME_KEY, "wattdepot.herokuapp.com");
     }
     catch (Exception e) {
       properties.setProperty(PORT_KEY, "8182");
       properties.setProperty(TEST_PORT_KEY, "8183");
-      properties.setProperty(HOSTNAME_KEY, "localhost");
-      properties.setProperty(TEST_HOSTNAME_KEY, "localhost");
     }
     
+    properties.setProperty(TEST_HOSTNAME_KEY, "wattdepot.herokuapp.com");
+    //properties.setProperty(TEST_HOSTNAME_KEY, "localhost");
     properties.setProperty(GVIZ_PORT_KEY, "8184");
     properties.setProperty(TEST_DOMAIN_KEY, "example.com");
     properties.setProperty(TEST_INSTALL_KEY, FALSE);
