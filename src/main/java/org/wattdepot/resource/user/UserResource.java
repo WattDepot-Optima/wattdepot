@@ -38,16 +38,16 @@ public class UserResource extends WattDepotResource {
       if (uriUser == null) {
         // URI had no user parameter, which means the request is for the list of all users
         try {
-       //   if (isAdminUser()) {
+          if (isAdminUser()) {
             // admin user can see all users
             xmlString = getUserIndex();
             return getStringRepresentation(xmlString);
-      //    }
-      //    else {
+          }
+          else {
             // Authenticated as some user
-      //      setStatusBadCredentials();
-      //      return null;
-      //    }
+            setStatusBadCredentials();
+            return null;
+          }
         }
         catch (JAXBException e) {
           setStatusInternalError(e);
