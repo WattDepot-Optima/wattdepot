@@ -120,8 +120,7 @@ public class ServerProperties {
     properties.setProperty(GVIZ_CONTEXT_ROOT_KEY, "gviz");
     properties.setProperty(DB_DIR_KEY, serverHome + "/db");
     properties.setProperty(DB_SNAPSHOT_KEY, serverHome + "/db-snapshot");
-    //properties.setProperty(DB_IMPL_KEY, "org.wattdepot.server.db.derby.DerbyStorageImplementation");
-    properties.setProperty(DB_IMPL_KEY, "org.wattdepot.server.db.memory.MemoryStorageImplementation");
+    properties.setProperty(DB_IMPL_KEY, "org.wattdepot.server.db.derby.DerbyStorageImplementation");
     properties.setProperty(LOGGING_LEVEL_KEY, "INFO");
     properties.setProperty(RESTLET_LOGGING_KEY, FALSE);
     properties.setProperty(SMTP_HOST_KEY, "mail.hawaii.edu");
