@@ -33,11 +33,13 @@ import org.wattdepot.resource.energy.EnergyResource;
 import org.wattdepot.resource.gviz.GVisualizationServlet;
 import org.wattdepot.resource.health.HealthResource;
 import org.wattdepot.resource.power.PowerResource;
+import org.wattdepot.resource.property.jaxb.Property;
 import org.wattdepot.resource.sensordata.SensorDataResource;
 import org.wattdepot.resource.sensordata.jaxb.SensorData;
 import org.wattdepot.resource.sensordata.jaxb.SensorDatas;
 import org.wattdepot.resource.source.SourceResource;
 import org.wattdepot.resource.source.jaxb.Source;
+import org.wattdepot.resource.source.jaxb.SubSources;
 import org.wattdepot.resource.source.summary.SourceSummaryResource;
 import org.wattdepot.resource.user.UserResource;
 import org.wattdepot.resource.user.jaxb.User;
@@ -276,9 +278,76 @@ public class Server extends Application {
       server.component.start();
      // server.jettyServer.start();
       server.logger.warning("WattDepot server (Version " + getVersion() + ") now running.");
+      
+      createDefaultData(server, dbManager);
+      
       return server;
     }
   }
+    
+    
+  //TODO: remove this..
+    /**
+     * Kludges up some default data so that SensorData can be stored. Originally this was to support a
+     * demo (since there was no way to create sources or users), but now some tests use this data, so
+     * it has been moved here.
+     * 
+     * @return True if the default data could be created, or false otherwise.
+     */
+    public static boolean createDefaultData(Server server, DbManager dbManager) {
+      // Need to (re)create admin user, since the database gets wiped by each test
+      ServerProperties serverProps =
+          (ServerProperties) server.getContext().getAttributes().get("ServerProperties");
+      String adminUsername = serverProps.get(ServerProperties.ADMIN_EMAIL_KEY);
+      String adminPassword = serverProps.get(ServerProperties.ADMIN_PASSWORD_KEY);
+      // create the admin User object based on the server properties
+      User adminUser = new User(adminUsername, adminPassword, true, null);
+      // stick admin user into database
+      if (!dbManager.storeUser(adminUser)) {
+        // server.getLogger().severe("Unable to create admin user from properties!");
+        return false;
+      }
+      // create a non-admin user that owns a source for testing
+      User ownerUser = new User("joebogus@example.com", "totally-bogus", false, null);
+      if (!dbManager.storeUser(ownerUser)) {
+        return false;
+      }
+      // create a non-admin user that owns nothing for testing
+      User nonOwnerUser = new User("jimbogus@example.com", "super-bogus", false, null);
+      if (!dbManager.storeUser(nonOwnerUser)) {
+        return false;
+      }
+
+      // create public source
+      Source source1 =
+          new Source("saunders-hall", ownerUser.toUri(server), true, false,
+              "21.30078,-157.819129,41", "Saunders Hall on the University of Hawaii at Manoa campus",
+              "Obvius-brand power meter", null, null);
+      source1.addProperty(new Property(Source.CARBON_INTENSITY, "1000"));
+      // stick public source into database
+      if (!dbManager.storeSource(source1)) {
+        return false;
+      }
+
+      Source source2 =
+          new Source("secret-place", ownerUser.toUri(server), false, false,
+              "21.35078,-157.819129,41", "Made up private place", "Foo-brand power meter", null, null);
+      source2.addProperty(new Property(Source.CARBON_INTENSITY, "3000"));
+      // stick public source into database
+      if (!dbManager.storeSource(source2)) {
+        return false;
+      }
+
+      SubSources subSources = new SubSources();
+      subSources.getHref().add(source1.toUri(server));
+      subSources.getHref().add(source2.toUri(server));
+
+      Source virtualSource =
+          new Source("virtual-source", ownerUser.toUri(server), true, true,
+              "31.30078,-157.819129,41", "Made up location 3", "Virtual source", null, subSources);
+      return (dbManager.storeSource(virtualSource));
+    }
+  
 
   /**
    * Loads the default resources from canonical directory into database. Intended to be called after
