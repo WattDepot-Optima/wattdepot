@@ -7,7 +7,6 @@ import org.restlet.data.Status;
 import org.restlet.representation.Representation;
 import org.restlet.representation.Variant;
 import org.wattdepot.resource.WattDepotResource;
-import org.wattdepot.resource.source.jaxb.Source;
 import org.wattdepot.resource.user.jaxb.User;
 
 /**
@@ -99,9 +98,9 @@ public class UserResource extends WattDepotResource {
   @Override
   public Representation put(Representation entity, Variant variant) {
     // If credentials are provided, they need to be valid
-   // if (!validateCredentials()) {
-   //   return null;
-   // }
+    if (!validateCredentials()) {
+      return null;
+    }
     // Get the payload.
     String entityString = null;
     try {
