@@ -65,7 +65,7 @@ public class PostgresStorageImplementation extends DbImplementation {
       "Unable to parse property XML from database ";
 
   /** The PostgreSQL connection URL */
-  private final String connectionUrl = System.getenv("DATABASE_URL");
+  private final String connectionUrl = "jdbc:"+System.getenv("DATABASE_URL");
   /** Indicates whether this database was initialized or was pre-existing. */
   private boolean isFreshlyCreated = false;
 
