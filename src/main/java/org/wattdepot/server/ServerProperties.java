@@ -129,7 +129,7 @@ public class ServerProperties {
 
     if (HEROKU) {
       properties.setProperty(DB_IMPL_KEY,
-          "org.wattdepot.server.db.derby.PostgresStorageImplementation");
+          "org.wattdepot.server.db.postgres.PostgresStorageImplementation");
       properties.setProperty(HOSTNAME_KEY, "wattdepot.herokuapp.com");
       properties.setProperty(PORT_KEY, System.getenv("PORT"));
       properties.setProperty(TEST_HOSTNAME_KEY, "wattdepot.herokuapp.com");
