@@ -68,7 +68,7 @@ public class ServerProperties {
   private static String TRUE = "true";
 
   /** Set to true to run on Heroku, otherwise use localhost. */
-  private static boolean HEROKU = true;
+  public static boolean HEROKU = true;
 
   /**
    * Creates a new ServerProperties instance using the default filename. Prints an error to the
@@ -126,18 +126,16 @@ public class ServerProperties {
     properties.setProperty(LOGGING_LEVEL_KEY, "INFO");
     properties.setProperty(RESTLET_LOGGING_KEY, FALSE);
     properties.setProperty(SMTP_HOST_KEY, "mail.hawaii.edu");
+    properties.setProperty(DB_IMPL_KEY,
+        "org.wattdepot.server.db.postgres.PostgresStorageImplementation");
 
     if (HEROKU) {
-      properties.setProperty(DB_IMPL_KEY,
-          "org.wattdepot.server.db.postgres.PostgresStorageImplementation");
       properties.setProperty(HOSTNAME_KEY, "wattdepot.herokuapp.com");
       properties.setProperty(PORT_KEY, System.getenv("PORT"));
       properties.setProperty(TEST_HOSTNAME_KEY, "wattdepot.herokuapp.com");
       properties.setProperty(TEST_PORT_KEY, System.getenv("PORT"));
     }
     else {
-      properties.setProperty(DB_IMPL_KEY,
-          "org.wattdepot.server.db.derby.DerbyStorageImplementation");
       properties.setProperty(HOSTNAME_KEY, "localhost");
       properties.setProperty(PORT_KEY, "8182");
       properties.setProperty(TEST_HOSTNAME_KEY, "localhost");
