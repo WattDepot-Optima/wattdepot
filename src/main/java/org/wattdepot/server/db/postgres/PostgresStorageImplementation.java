@@ -51,8 +51,14 @@ import org.wattdepot.util.tstamp.Tstamp;
  */
 public class PostgresStorageImplementation extends DbImplementation {
 
-  /** The JDBC driver. */
-  private static final String driver = "org.postgresql.Driver";
+  /** Port number to connect to PostgreSQL on (ignored for Heroku). */
+  private static final String port = "5432";
+  /** Name of database to use (ignored for Heroku). */
+  private static final String dbName = "wattdepot";
+  /** Username for database (ignored for Heroku). */
+  private static final String userName = "postgres";
+  /** Password for database (ignored for Heroku). */
+  private static final String password = "userpass";
 
   /** The logger message when executing a query. */
   private static final String executeQueryMsg = "PostgreSQL: Executing query ";
@@ -64,8 +70,11 @@ public class PostgresStorageImplementation extends DbImplementation {
   private static final String UNABLE_TO_PARSE_PROPERTY_XML =
       "Unable to parse property XML from database ";
 
+  /** The JDBC driver. */
+  private static final String driver = "org.postgresql.Driver";
+
   /** The PostgreSQL connection URL */
-  private final String connectionUrl = "jdbc:"+System.getenv("DATABASE_URL");
+  private final String connectionUrl;
   /** Indicates whether this database was initialized or was pre-existing. */
   private boolean isFreshlyCreated = false;
 
@@ -101,6 +110,16 @@ public class PostgresStorageImplementation extends DbImplementation {
    */
   public PostgresStorageImplementation(Server server) {
     super(server);
+
+    if (server.getServerProperties().HEROKU) {
+      connectionUrl = "jdbc:" + System.getenv("DATABASE_URL");
+    }
+    else {
+      connectionUrl =
+          "jdbc:postgresql://"
+              + server.getServerProperties().get(server.getServerProperties().HOSTNAME_KEY) + ":"
+              + port + "/" + dbName + "?user=" + userName + "&password=" + password;
+    }
 
     // Try to load the derby driver.
     try {
@@ -165,7 +184,7 @@ public class PostgresStorageImplementation extends DbImplementation {
     }
     catch (SQLException e) {
       String theError = (e).getSQLState();
-      if ("42X05".equals(theError)) {
+      if ("42P01".equals(theError)) {
         // Database doesn't exist.
         return false;
       }
@@ -208,8 +227,12 @@ public class PostgresStorageImplementation extends DbImplementation {
       s.close();
     }
     finally {
-      s.close();
-      conn.close();
+      if (s != null) {
+        s.close();
+      }
+      if (conn != null) {
+        conn.close();
+      }
     }
   }
 
@@ -230,8 +253,12 @@ public class PostgresStorageImplementation extends DbImplementation {
       s.close();
     }
     finally {
-      s.close();
-      conn.close();
+      if (s != null) {
+        s.close();
+      }
+      if (conn != null) {
+        conn.close();
+      }
     }
   }
 
@@ -298,9 +325,15 @@ public class PostgresStorageImplementation extends DbImplementation {
     }
     finally {
       try {
-        rs.close();
-        s.close();
-        conn.close();
+        if (rs != null) {
+          rs.close();
+        }
+        if (s != null) {
+          s.close();
+        }
+        if (conn != null) {
+          conn.close();
+        }
       }
       catch (SQLException e) {
         this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -381,9 +414,15 @@ public class PostgresStorageImplementation extends DbImplementation {
     }
     finally {
       try {
-        rs.close();
-        s.close();
-        conn.close();
+        if (rs != null) {
+          rs.close();
+        }
+        if (s != null) {
+          s.close();
+        }
+        if (conn != null) {
+          conn.close();
+        }
       }
       catch (SQLException e) {
         this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -422,9 +461,15 @@ public class PostgresStorageImplementation extends DbImplementation {
       }
       finally {
         try {
-          rs.close();
-          s.close();
-          conn.close();
+          if (rs != null) {
+            rs.close();
+          }
+          if (s != null) {
+            s.close();
+          }
+          if (conn != null) {
+            conn.close();
+          }
         }
         catch (SQLException e) {
           this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -461,9 +506,15 @@ public class PostgresStorageImplementation extends DbImplementation {
       }
       finally {
         try {
-          rs.close();
-          s.close();
-          conn.close();
+          if (rs != null) {
+            rs.close();
+          }
+          if (s != null) {
+            s.close();
+          }
+          if (conn != null) {
+            conn.close();
+          }
         }
         catch (SQLException e) {
           this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -501,7 +552,7 @@ public class PostgresStorageImplementation extends DbImplementation {
       try {
         // Get timestamp of first sensor data for this source
         statement =
-            "SELECT Tstamp FROM SensorData WHERE Source = ? ORDER BY Tstamp ASC FETCH FIRST ROW ONLY";
+            "SELECT Tstamp FROM SensorData WHERE Source = ? ORDER BY Tstamp ASC LIMIT 1";
         conn = DriverManager.getConnection(connectionUrl);
         server.getLogger().fine(executeQueryMsg + statement);
         s = conn.prepareStatement(statement);
@@ -521,7 +572,7 @@ public class PostgresStorageImplementation extends DbImplementation {
         s.close();
         // Get timestamp of last sensor data for this source
         statement =
-            "SELECT Tstamp FROM SensorData WHERE Source = ? ORDER BY Tstamp DESC FETCH FIRST ROW ONLY";
+            "SELECT Tstamp FROM SensorData WHERE Source = ? ORDER BY Tstamp DESC LIMIT 1";
         server.getLogger().fine(executeQueryMsg + statement);
         s = conn.prepareStatement(statement);
         s.setString(1, Source.sourceToUri(subSourceName, this.server));
@@ -553,9 +604,15 @@ public class PostgresStorageImplementation extends DbImplementation {
       }
       finally {
         try {
-          rs.close();
-          s.close();
-          conn.close();
+          if (rs != null) {
+            rs.close();
+          }
+          if (s != null) {
+            s.close();
+          }
+          if (conn != null) {
+            conn.close();
+          }
         }
         catch (SQLException e) {
           this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -655,7 +712,9 @@ public class PostgresStorageImplementation extends DbImplementation {
           if (s != null) {
             s.close();
           }
-          conn.close();
+          if (conn != null) {
+            conn.close();
+          }
         }
         catch (SQLException e) {
           this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -775,9 +834,15 @@ public class PostgresStorageImplementation extends DbImplementation {
       }
       finally {
         try {
-          rs.close();
-          s.close();
-          conn.close();
+          if (rs != null) {
+            rs.close();
+          }
+          if (s != null) {
+            s.close();
+          }
+          if (conn != null) {
+            conn.close();
+          }
         }
         catch (SQLException e) {
           this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -832,9 +897,15 @@ public class PostgresStorageImplementation extends DbImplementation {
       }
       finally {
         try {
-          rs.close();
-          s.close();
-          conn.close();
+          if (rs != null) {
+            rs.close();
+          }
+          if (s != null) {
+            s.close();
+          }
+          if (conn != null) {
+            conn.close();
+          }
         }
         catch (SQLException e) {
           this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -884,9 +955,15 @@ public class PostgresStorageImplementation extends DbImplementation {
       }
       finally {
         try {
-          rs.close();
-          s.close();
-          conn.close();
+          if (rs != null) {
+            rs.close();
+          }
+          if (s != null) {
+            s.close();
+          }
+          if (conn != null) {
+            conn.close();
+          }
         }
         catch (SQLException e) {
           this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -926,9 +1003,15 @@ public class PostgresStorageImplementation extends DbImplementation {
       }
       finally {
         try {
-          rs.close();
-          s.close();
-          conn.close();
+          if (rs != null) {
+            rs.close();
+          }
+          if (s != null) {
+            s.close();
+          }
+          if (conn != null) {
+            conn.close();
+          }
         }
         catch (SQLException e) {
           this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -967,9 +1050,15 @@ public class PostgresStorageImplementation extends DbImplementation {
     }
     finally {
       try {
-        rs.close();
-        s.close();
-        conn.close();
+        if (rs != null) {
+          rs.close();
+        }
+        if (s != null) {
+          s.close();
+        }
+        if (conn != null) {
+          conn.close();
+        }
       }
       catch (SQLException e) {
         this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -1039,8 +1128,12 @@ public class PostgresStorageImplementation extends DbImplementation {
       }
       finally {
         try {
-          s.close();
-          conn.close();
+          if (s != null) {
+            s.close();
+          }
+          if (conn != null) {
+            conn.close();
+          }
         }
         catch (SQLException e) {
           this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -1188,9 +1281,15 @@ public class PostgresStorageImplementation extends DbImplementation {
       }
       finally {
         try {
-          s.close();
-          rs.close();
-          conn.close();
+          if (rs != null) {
+            rs.close();
+          }
+          if (s != null) {
+            s.close();
+          }
+          if (conn != null) {
+            conn.close();
+          }
         }
         catch (SQLException e) {
           this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -1361,9 +1460,15 @@ public class PostgresStorageImplementation extends DbImplementation {
     }
     finally {
       try {
-        rs.close();
-        s.close();
-        conn.close();
+        if (rs != null) {
+          rs.close();
+        }
+        if (s != null) {
+          s.close();
+        }
+        if (conn != null) {
+          conn.close();
+        }
       }
       catch (SQLException e) {
         this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -1414,9 +1519,15 @@ public class PostgresStorageImplementation extends DbImplementation {
       }
       finally {
         try {
-          rs.close();
-          s.close();
-          conn.close();
+          if (rs != null) {
+            rs.close();
+          }
+          if (s != null) {
+            s.close();
+          }
+          if (conn != null) {
+            conn.close();
+          }
         }
         catch (SQLException e) {
           this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -1479,8 +1590,12 @@ public class PostgresStorageImplementation extends DbImplementation {
       }
       finally {
         try {
-          s.close();
-          conn.close();
+          if (s != null) {
+            s.close();
+          }
+          if (conn != null) {
+            conn.close();
+          }
         }
         catch (SQLException e) {
           this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -1533,8 +1648,12 @@ public class PostgresStorageImplementation extends DbImplementation {
     }
     finally {
       try {
-        s.close();
-        conn.close();
+        if (s != null) {
+          s.close();
+        }
+        if (conn != null) {
+          conn.close();
+        }
       }
       catch (SQLException e) {
         this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -1583,8 +1702,12 @@ public class PostgresStorageImplementation extends DbImplementation {
     }
     finally {
       try {
-        cs.close();
-        conn.close();
+        if (cs != null) {
+          cs.close();
+        }
+        if (conn != null) {
+          conn.close();
+        }
       }
       catch (SQLException e) {
         this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -1626,8 +1749,12 @@ public class PostgresStorageImplementation extends DbImplementation {
     }
     finally {
       try {
-        s.close();
-        conn.close();
+        if (s != null) {
+          s.close();
+        }
+        if (conn != null) {
+          conn.close();
+        }
       }
       catch (SQLException e) {
         this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -1671,8 +1798,12 @@ public class PostgresStorageImplementation extends DbImplementation {
     }
     finally {
       try {
-        cs.close();
-        conn.close();
+        if (cs != null) {
+          cs.close();
+        }
+        if (conn != null) {
+          conn.close();
+        }
       }
       catch (SQLException e) {
         this.logger.warning(errorClosingMsg + StackTrace.toString(e));
