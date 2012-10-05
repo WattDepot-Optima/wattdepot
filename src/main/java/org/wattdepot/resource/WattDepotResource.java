@@ -9,14 +9,12 @@ import javax.xml.bind.JAXBException;
 import javax.xml.bind.Marshaller;
 import javax.xml.bind.Unmarshaller;
 import javax.xml.datatype.XMLGregorianCalendar;
-import org.restlet.data.CharacterSet;
-import org.restlet.data.Form;
-import org.restlet.data.Language;
-import org.restlet.data.MediaType;
+import org.restlet.data.Method;
 import org.restlet.data.Status;
-import org.restlet.representation.StringRepresentation;
-import org.restlet.representation.Variant;
+import org.restlet.engine.header.Header;
+import org.restlet.engine.header.HeaderConstants;
 import org.restlet.resource.ServerResource;
+import org.restlet.util.Series;
 import org.wattdepot.resource.sensordata.jaxb.SensorData;
 import org.wattdepot.resource.sensordata.jaxb.SensorDataIndex;
 import org.wattdepot.resource.sensordata.jaxb.SensorDatas;
@@ -27,6 +25,7 @@ import org.wattdepot.resource.source.jaxb.Sources;
 import org.wattdepot.resource.source.summary.jaxb.SourceSummary;
 import org.wattdepot.resource.user.jaxb.User;
 import org.wattdepot.server.Server;
+import org.wattdepot.server.WattDepotEnroler;
 import org.wattdepot.server.db.DbBadIntervalException;
 import org.wattdepot.server.db.DbManager;
 import org.wattdepot.util.tstamp.Tstamp;
@@ -106,35 +105,30 @@ public class WattDepotResource extends ServerResource {
     this.uriSource = (String) this.getRequest().getAttributes().get("source");
 
     // This resource has only one type of representation.
-    getVariants().add(new Variant(MediaType.TEXT_XML));
+//    getVariants().add(new Variant(MediaType.TEXT_XML));
 
     // Add Cross-Origin Resource Sharing header to all responses.
     // See https://developer.mozilla.org/En/HTTP_access_control for more details
     // TODO This should really be done at the individual resource level and should add the header
     // only for public resources, but this is a quick hack to support a JavaScript application.
-    // Code from here: http://blog.arc90.com/2008/09/15/custom-http-response-headers-with-restlet/
-    Form responseHeaders = (Form) getResponse().getAttributes().get("org.restlet.http.headers");
+    // Code from this wiki page:
+    // http://wiki.restlet.org/docs_2.1/13-restlet/21-restlet/171-restlet/155-restlet.html
+    @SuppressWarnings("unchecked")
+    Series<Header> responseHeaders =
+        (Series<Header>) getResponse().getAttributes().get(HeaderConstants.ATTRIBUTE_HEADERS);
     if (responseHeaders == null) {
-      responseHeaders = new Form();
-      getResponse().getAttributes().put("org.restlet.http.headers", responseHeaders);
+      responseHeaders = new Series<Header>(Header.class);
+      getResponse().getAttributes().put(HeaderConstants.ATTRIBUTE_HEADERS, responseHeaders);
     }
-    responseHeaders.add("Access-Control-Allow-Origin", "*");
-  }
+    responseHeaders.add(new Header("Access-Control-Allow-Origin", "*"));
 
-  /**
-   * Creates and returns a new Restlet StringRepresentation built from xmlData. The xmlData will be
-   * prefixed with a processing instruction indicating UTF-8 and version 1.0.
-   * 
-   * @param xmlData The XML data as a string.
-   * @return A StringRepresentation of that xmlData.
-   */
-  public static StringRepresentation getStringRepresentation(String xmlData) {
-    // StringBuilder builder = new StringBuilder(500);
-    // builder.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
-    // builder.append(xmlData);
-    // return new StringRepresentation(builder, MediaType.TEXT_XML, Language.ALL,
-    // CharacterSet.UTF_8);
-    return new StringRepresentation(xmlData, MediaType.TEXT_XML, Language.ALL, CharacterSet.UTF_8);
+    if (!isAnonymous() && !validateCredentials()) {
+      this.server.guard.forbid(this.getResponse());
+    }
+
+    if (uriSource != null && this.getMethod() == Method.GET) {
+      validateUriSource();
+    }
   }
 
   /**
@@ -190,6 +184,18 @@ public class WattDepotResource extends ServerResource {
 
     marshaller.marshal(user, writer);
     return writer.toString();
+  }
+
+  /**
+   * Takes a String encoding of a User in XML format and converts it to an instance.
+   * 
+   * @param xmlString The XML string representing a User.
+   * @return The corresponding User instance.
+   * @throws JAXBException If problems occur during unmarshalling.
+   */
+  public User makeUser(String xmlString) throws JAXBException {
+    Unmarshaller unmarshaller = userJaxbContext.createUnmarshaller();
+    return (User) unmarshaller.unmarshal(new StringReader(xmlString));
   }
 
   /**
@@ -273,7 +279,7 @@ public class WattDepotResource extends ServerResource {
       // Use ListIterator to loop over all Sources, removing those that aren't public
       while (iterator.hasNext()) {
         Source source = iterator.next();
-        if (!source.isPublic() && !isSourceOwner(source.getName())) {
+        if (!source.isPublic() && !isSourceOwner(source)) {
           iterator.remove();
         }
       }
@@ -287,7 +293,7 @@ public class WattDepotResource extends ServerResource {
       // current user
       while (iterator.hasNext()) {
         SourceRef ref = iterator.next();
-        if (!ref.isPublic() && !isSourceOwner(ref.getName())) {
+        if (!ref.isPublic() && !isSourceOwner(ref)) {
           iterator.remove();
         }
       }
@@ -336,18 +342,6 @@ public class WattDepotResource extends ServerResource {
   public Source makeSource(String xmlString) throws JAXBException {
     Unmarshaller unmarshaller = sourceJaxbContext.createUnmarshaller();
     return (Source) unmarshaller.unmarshal(new StringReader(xmlString));
-  }
-  
-  /**
-   * Takes a String encoding of a User in XML format and converts it to an instance.
-   * 
-   * @param xmlString The XML string representing a User.
-   * @return The corresponding User instance.
-   * @throws JAXBException If problems occur during unmarshalling.
-   */
-  public User makeUser(String xmlString) throws JAXBException {
-    Unmarshaller unmarshaller = userJaxbContext.createUnmarshaller();
-    return (User) unmarshaller.unmarshal(new StringReader(xmlString));
   }
 
   /**
@@ -429,9 +423,40 @@ public class WattDepotResource extends ServerResource {
    */
   public String getSensorDataIndex(XMLGregorianCalendar startTime, XMLGregorianCalendar endTime)
       throws JAXBException, DbBadIntervalException {
+    if (startTime == null || endTime == null) {
+      return null;
+    }
     Marshaller marshaller = sensorDataJaxbContext.createMarshaller();
     StringWriter writer = new StringWriter();
     SensorDataIndex index = this.dbManager.getSensorDataIndex(this.uriSource, startTime, endTime);
+    if (index == null) {
+      return null;
+    }
+    else {
+      marshaller.marshal(index, writer);
+      return writer.toString();
+    }
+  }
+
+  /**
+   * Returns an XML string representation of a SensorDataIndex containing all the SensorData for the
+   * Source name given in the URI after the provided start time, or null if the named Source doesn't
+   * exist.
+   * 
+   * @param startTime The start time requested.
+   * @return The XML string representing the requested SensorDataIndex, or null if source name is
+   * unknown.
+   * @throws JAXBException If there are problems mashalling the SensorDataIndex.
+   * @throws DbBadIntervalException If the start time is later than the end time.
+   */
+  public String getSensorDataIndex(XMLGregorianCalendar startTime) throws JAXBException,
+      DbBadIntervalException {
+    if (startTime == null) {
+      return null;
+    }
+    Marshaller marshaller = sensorDataJaxbContext.createMarshaller();
+    StringWriter writer = new StringWriter();
+    SensorDataIndex index = this.dbManager.getSensorDataIndex(this.uriSource, startTime);
     if (index == null) {
       return null;
     }
@@ -455,9 +480,40 @@ public class WattDepotResource extends ServerResource {
    */
   public String getSensorDatas(XMLGregorianCalendar startTime, XMLGregorianCalendar endTime)
       throws JAXBException, DbBadIntervalException {
+    if (startTime == null || endTime == null) {
+      return null;
+    }
     Marshaller marshaller = sensorDataJaxbContext.createMarshaller();
     StringWriter writer = new StringWriter();
     SensorDatas datas = this.dbManager.getSensorDatas(this.uriSource, startTime, endTime);
+    if (datas == null) {
+      return null;
+    }
+    else {
+      marshaller.marshal(datas, writer);
+      return writer.toString();
+    }
+  }
+
+  /**
+   * Returns an XML string representation of a SensorDatas object containing all the SensorData for
+   * the Source name given in the URI after the provided start time, or null if the named Source
+   * doesn't exist.
+   * 
+   * @param startTime The start time requested.
+   * @return The XML string representing the requested SensorDatas object, or null if source name is
+   * unknown.
+   * @throws JAXBException If there are problems mashalling the SensorDataIndex.
+   * @throws DbBadIntervalException If the start time is later than the end time.
+   */
+  public String getSensorDatas(XMLGregorianCalendar startTime) throws JAXBException,
+      DbBadIntervalException {
+    if (startTime == null) {
+      return null;
+    }
+    Marshaller marshaller = sensorDataJaxbContext.createMarshaller();
+    StringWriter writer = new StringWriter();
+    SensorDatas datas = this.dbManager.getSensorDatas(this.uriSource, startTime);
     if (datas == null) {
       return null;
     }
@@ -512,8 +568,8 @@ public class WattDepotResource extends ServerResource {
    * cannot be found/calculated.
    * @throws JAXBException If there are problems mashalling the SensorData.
    */
-  public String getEnergy(XMLGregorianCalendar startTime, XMLGregorianCalendar endTime,
-      int interval) throws JAXBException {
+  public String getEnergy(XMLGregorianCalendar startTime, XMLGregorianCalendar endTime, int interval)
+      throws JAXBException {
     Marshaller marshaller = sensorDataJaxbContext.createMarshaller();
     StringWriter writer = new StringWriter();
     SensorData energyData = null;
@@ -541,6 +597,37 @@ public class WattDepotResource extends ServerResource {
   }
 
   /**
+   * Returns the XML string containing the energy in SensorData format for the Source name given in
+   * the URI after the startTime, or null if no energy data exists.
+   * 
+   * @param startTime The start of the range requested.
+   * @param interval The sampling interval requested.
+   * @return The XML string representing the requested energy in SensorData format, or null if it
+   * cannot be found/calculated.
+   * @throws JAXBException If there are problems mashalling the SensorData.
+   */
+  public String getEnergy(XMLGregorianCalendar startTime, int interval) throws JAXBException {
+    Marshaller marshaller = sensorDataJaxbContext.createMarshaller();
+    StringWriter writer = new StringWriter();
+    SensorData energyData = null;
+
+    if (interval < 0) {
+      setStatusBadSamplingInterval(Integer.toString(interval));
+      // TODO BOGUS, should throw an exception so EnergyResource can distinguish between problems
+      return null;
+    }
+
+    energyData = this.dbManager.getEnergy(this.uriSource, startTime, interval);
+    if (energyData == null) {
+      return null;
+    }
+    else {
+      marshaller.marshal(energyData, writer);
+      return writer.toString();
+    }
+  }
+
+  /**
    * Returns the XML string containing the carbon in SensorData format for the Source name given in
    * the URI over the range of time between startTime and endTime, or null if no carbon data exists.
    * 
@@ -551,8 +638,8 @@ public class WattDepotResource extends ServerResource {
    * cannot be found/calculated.
    * @throws JAXBException If there are problems mashalling the SensorData.
    */
-  public String getCarbon(XMLGregorianCalendar startTime, XMLGregorianCalendar endTime,
-      int interval) throws JAXBException {
+  public String getCarbon(XMLGregorianCalendar startTime, XMLGregorianCalendar endTime, int interval)
+      throws JAXBException {
     Marshaller marshaller = sensorDataJaxbContext.createMarshaller();
     StringWriter writer = new StringWriter();
     SensorData carbonData = null;
@@ -580,21 +667,51 @@ public class WattDepotResource extends ServerResource {
   }
 
   /**
-   * Returns true if the source name present in the URI is valid, i.e. it exists in the database.
-   * Otherwise sets the Response status and returns false.
+   * Returns the XML string containing the carbon in SensorData format for the Source name given in
+   * the URI after the startTime, or null if no carbon data exists.
    * 
-   * @return True if the named Source exists in the database, false otherwise.
+   * @param startTime The start of the range requested.
+   * @param interval The sampling interval requested.
+   * @return The XML string representing the requested carbon in SensorData format, or null if it
+   * cannot be found/calculated.
+   * @throws JAXBException If there are problems mashalling the SensorData.
    */
-  public boolean validateKnownSource() {
-    // a Source is valid if we can retrieve it from the database
-    if (dbManager.getSource(uriSource) == null) {
-      // Might want to use a generic response message so as to not leak information.
-      setStatusUnknownSource();
-      return false;
+  public String getCarbon(XMLGregorianCalendar startTime, int interval) throws JAXBException {
+    Marshaller marshaller = sensorDataJaxbContext.createMarshaller();
+    StringWriter writer = new StringWriter();
+    SensorData carbonData = null;
+
+    if (interval < 0) {
+      setStatusBadSamplingInterval(Integer.toString(interval));
+      // TODO BOGUS, should throw an exception so EnergyResource can distinguish between problems
+      return null;
+    }
+
+    carbonData = this.dbManager.getCarbon(this.uriSource, startTime, interval);
+    if (carbonData == null) {
+      return null;
     }
     else {
-      return true;
+      marshaller.marshal(carbonData, writer);
+      return writer.toString();
     }
+  }
+
+  /**
+   * Returns the source with the name in the URI if it is valid, i.e. it exists in the database.
+   * Otherwise sets the Response status and returns null.
+   * 
+   * @return The source with the name in the URI if it exists, or null if it doesn't.
+   */
+  public Source validateKnownSource() {
+    // a Source is valid if we can retrieve it from the database
+    Source source = dbManager.getSource(uriSource);
+    if (source == null) {
+      // Might want to use a generic response message so as to not leak information.
+      setStatusUnknownSource();
+    }
+
+    return source;
   }
 
   /**
@@ -615,20 +732,11 @@ public class WattDepotResource extends ServerResource {
    * @return True if the credentials match, false if they don't or the user doesn't exist
    */
   public boolean validateCredentials() {
-    User user = dbManager.getUser(authUsername);
-    if (user == null) {
+    if (!server.authenticate(getRequest(), getResponse())) {
       setStatusBadCredentials();
       return false;
     }
-    else {
-      if (user.getEmail().equals(authUsername) && user.getPassword().equals(authPassword)) {
-        return true;
-      }
-      else {
-        setStatusBadCredentials();
-        return false;
-      }
-    }
+    return true;
   }
 
   /**
@@ -638,55 +746,62 @@ public class WattDepotResource extends ServerResource {
    * @return True if the username in the credentials is an administrator, false otherwise.
    */
   public boolean isAdminUser() {
-    User user = dbManager.getUser(authUsername);
-    if (user == null) {
-      return false;
-    }
-    return user.isAdmin();
+    return isInRole(WattDepotEnroler.ADMINISTRATOR.getName());
   }
 
   /**
-   * Returns true if the username provided in the HTTP request is the owner of the Source in the
-   * URI. Note, does not check whether the credentials are valid (i.e. the password matches)!
-   * 
-   * @return True if the username in the credentials is the owner of the Source in the URI, false
-   * otherwise.
-   */
-  public boolean isSourceOwner() {
-    return isSourceOwner(uriSource);
-  }
-
-  /**
-   * Returns true if the username provided in the HTTP request is the owner of the given source name
+   * Returns true if the username provided in the HTTP request is the owner of the given source
    * Note, does not check whether the credentials are valid (i.e. the password matches)!
    * 
-   * @param sourceName The name of the source to check the username against.
-   * @return True if the username in the credentials is the owner of the source name provided, false
+   * @param source The source object to check the username against.
+   * @return True if the username in the credentials is the owner of the source provided, false
    * otherwise.
    */
-  public boolean isSourceOwner(String sourceName) {
-    Source source = dbManager.getSource(sourceName);
-    User user = dbManager.getUser(authUsername);
-    if ((source == null) || (user == null)) {
+  public boolean isSourceOwner(Source source) {
+    if (isAnonymous()) {
+      return false;
+    }
+    if (source == null) {
       return false;
     }
     else {
       // Check if the URI of the authenticated user matches the URI of the owner for the source
-      // parameter in the URI
-      return user.toUri(this.server).equals(source.getOwner());
+      return User.userToUri(authUsername, this.server).equals(source.getOwner());
     }
   }
 
   /**
-   * Returns true if the the authenticated user is the owner of the source name present in the URI,
-   * or if the authenticated user is an administrator (the SourceOwner access control level
-   * discussed in the REST API). Otherwise sets the Response status and returns false.
+   * Returns true if the username provided in the HTTP request is the owner of the given source ref
+   * Note, does not check whether the credentials are valid (i.e. the password matches)!
    * 
+   * @param ref The source ref object to check the username against.
+   * @return True if the username in the credentials is the owner of the source ref provided, false
+   * otherwise.
+   */
+  public boolean isSourceOwner(SourceRef ref) {
+    if (isAnonymous()) {
+      return false;
+    }
+    if (ref == null) {
+      return false;
+    }
+    else {
+      // Check if the URI of the authenticated user matches the URI of the owner for the source ref
+      return User.userToUri(authUsername, this.server).equals(ref.getOwner());
+    }
+  }
+
+  /**
+   * Returns true if the the authenticated user is the owner of the given source object, or if the
+   * authenticated user is an administrator (the SourceOwner access control level discussed in the
+   * REST API). Otherwise sets the Response status and returns false.
+   * 
+   * @param source The source to validate authentication for.
    * @return True if the current user owns the source in the URI or if the current user is an
    * administrator, false otherwise.
    */
-  public boolean validateSourceOwnerOrAdmin() {
-    if (isSourceOwner() || isAdminUser()) {
+  public boolean validateSourceOwnerOrAdmin(Source source) {
+    if (isAdminUser() || isSourceOwner(source)) {
       return true;
     }
     else {
@@ -696,6 +811,33 @@ public class WattDepotResource extends ServerResource {
       getResponse().setStatus(Status.CLIENT_ERROR_UNAUTHORIZED, removeNewLines(this.responseMsg));
       return false;
     }
+  }
+
+  /**
+   * Returns true if the uriSource is valid and is either public or valid for the authenticated user
+   * to view.
+   * 
+   * @return True if the source in the URI is valid and accessible to the current user.
+   */
+  public boolean validateUriSource() {
+    Source source = validateKnownSource();
+    if (source != null) {
+      // If source is private, check if current user is allowed to view
+      return (source.isPublic() || validateSourceOwnerOrAdmin(source));
+    }
+    else {
+      return false;
+    }
+  }
+
+  /**
+   * Called if the method is not allowed. Just sets the response code.
+   */
+  protected void setStatusMethodNotAllowed() {
+    this.responseMsg = ResponseMessage.methodNotAllowed(this, this.getLogger());
+
+    getResponse().setStatus(Status.CLIENT_ERROR_METHOD_NOT_ALLOWED,
+        removeNewLines(this.responseMsg));
   }
 
   /**

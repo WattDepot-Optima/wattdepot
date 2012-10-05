@@ -1,6 +1,5 @@
 package org.wattdepot.server.db.memory;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -8,7 +7,6 @@ import java.util.concurrent.ConcurrentMap;
 import javax.xml.datatype.DatatypeConstants;
 import javax.xml.datatype.XMLGregorianCalendar;
 import org.wattdepot.resource.sensordata.SensorDataStraddle;
-import org.wattdepot.resource.sensordata.StraddleList;
 import org.wattdepot.resource.sensordata.jaxb.SensorData;
 import org.wattdepot.resource.sensordata.jaxb.SensorDataIndex;
 import org.wattdepot.resource.sensordata.jaxb.SensorDataRef;
@@ -24,6 +22,7 @@ import org.wattdepot.resource.user.jaxb.UserRef;
 import org.wattdepot.server.Server;
 import org.wattdepot.server.db.DbBadIntervalException;
 import org.wattdepot.server.db.DbImplementation;
+import org.wattdepot.server.db.DbManager;
 import org.wattdepot.util.tstamp.Tstamp;
 
 /**
@@ -64,9 +63,10 @@ public class MemoryStorageImplementation extends DbImplementation {
    * persistence.
    * 
    * @param server The server this DbImplementation is associated with.
+   * @param dbManager The dbManager this DbImplementation is associated with.
    */
-  public MemoryStorageImplementation(Server server) {
-    super(server);
+  public MemoryStorageImplementation(Server server, DbManager dbManager) {
+    super(server, dbManager);
   }
 
   /** {@inheritDoc} */
@@ -142,6 +142,10 @@ public class MemoryStorageImplementation extends DbImplementation {
     summary.setTotalSensorDatas(0);
     // Want to go through sensordata for base source, and all subsources recursively
     List<Source> sourceList = getAllNonVirtualSubSources(baseSource);
+    if (sourceList.size() == 0) {
+      summary.setTotalSensorDatas(0);
+      return summary;
+    }
     XMLGregorianCalendar firstTimestamp = null, lastTimestamp = null, dataTimestamp;
     long dataCount = 0;
     for (Source subSource : sourceList) {
@@ -188,11 +192,12 @@ public class MemoryStorageImplementation extends DbImplementation {
         return true;
       }
       else {
-      Source previousValue = this.name2SourceHash.putIfAbsent(source.getName(), source);
-      // putIfAbsent returns the previous value that ended up in the hash, so if we get a null then
-      // no value was previously stored, so we succeeded. If we get anything else, then there was
-      // already a value in the hash for this username, so we failed.
-      return (previousValue == null);
+        Source previousValue = this.name2SourceHash.putIfAbsent(source.getName(), source);
+        // putIfAbsent returns the previous value that ended up in the hash, so if we get a null
+        // then
+        // no value was previously stored, so we succeeded. If we get anything else, then there was
+        // already a value in the hash for this username, so we failed.
+        return (previousValue == null);
       }
     }
   }
@@ -249,14 +254,14 @@ public class MemoryStorageImplementation extends DbImplementation {
   @Override
   public SensorDataIndex getSensorDataIndex(String sourceName, XMLGregorianCalendar startTime,
       XMLGregorianCalendar endTime) throws DbBadIntervalException {
-    if ((sourceName == null) || (startTime == null) || (endTime == null)) {
+    if ((sourceName == null) || (startTime == null)) {
       return null;
     }
     else if (this.name2SourceHash.get(sourceName) == null) {
       // Unknown Source name, therefore no possibility of SensorData
       return null;
     }
-    else if (startTime.compare(endTime) == DatatypeConstants.GREATER) {
+    else if (endTime != null && startTime.compare(endTime) == DatatypeConstants.GREATER) {
       // startTime > endTime, which is bogus
       throw new DbBadIntervalException(startTime, endTime);
     }
@@ -271,7 +276,13 @@ public class MemoryStorageImplementation extends DbImplementation {
         for (SensorData data : sensorDataMap.values()) {
           // Only interested in SensorData that is startTime <= data <= endTime
           int startComparison = data.getTimestamp().compare(startTime);
-          int endComparison = data.getTimestamp().compare(endTime);
+          int endComparison;
+          if (endTime == null) {
+            endComparison = DatatypeConstants.LESSER;
+          }
+          else {
+            endComparison = data.getTimestamp().compare(endTime);
+          }
           if ((startComparison == DatatypeConstants.EQUAL)
               || (endComparison == DatatypeConstants.EQUAL)
               || ((startComparison == DatatypeConstants.GREATER) && (endComparison == DatatypeConstants.LESSER))) {
@@ -289,14 +300,14 @@ public class MemoryStorageImplementation extends DbImplementation {
   @Override
   public SensorDatas getSensorDatas(String sourceName, XMLGregorianCalendar startTime,
       XMLGregorianCalendar endTime) throws DbBadIntervalException {
-    if ((sourceName == null) || (startTime == null) || (endTime == null)) {
+    if ((sourceName == null) || (startTime == null)) {
       return null;
     }
     else if (this.name2SourceHash.get(sourceName) == null) {
       // Unknown Source name, therefore no possibility of SensorData
       return null;
     }
-    else if (startTime.compare(endTime) == DatatypeConstants.GREATER) {
+    else if (endTime != null && startTime.compare(endTime) == DatatypeConstants.GREATER) {
       // startTime > endTime, which is bogus
       throw new DbBadIntervalException(startTime, endTime);
     }
@@ -311,7 +322,13 @@ public class MemoryStorageImplementation extends DbImplementation {
         for (SensorData data : sensorDataMap.values()) {
           // Only interested in SensorData that is startTime <= data <= endTime
           int startComparison = data.getTimestamp().compare(startTime);
-          int endComparison = data.getTimestamp().compare(endTime);
+          int endComparison;
+          if (endTime == null) {
+            endComparison = DatatypeConstants.LESSER;
+          }
+          else {
+            endComparison = data.getTimestamp().compare(endTime);
+          }
           if ((startComparison == DatatypeConstants.EQUAL)
               || (endComparison == DatatypeConstants.EQUAL)
               || ((startComparison == DatatypeConstants.GREATER) && (endComparison == DatatypeConstants.LESSER))) {
@@ -462,7 +479,7 @@ public class MemoryStorageImplementation extends DbImplementation {
    * If the given timestamp corresponds to an actual SensorData, then return a degenerate
    * SensorDataStraddle with both ends of the straddle set to the actual SensorData.
    * 
-   * @param sourceName The name of the source to generate the straddle from.
+   * @param source The source object to generate the straddle from.
    * @param timestamp The timestamp of interest in the straddle.
    * @return A SensorDataStraddle that straddles the given timestamp. Returns null if: parameters
    * are null, the source doesn't exist, source has no sensor data, or there is no sensor data that
@@ -470,13 +487,14 @@ public class MemoryStorageImplementation extends DbImplementation {
    * @see org.wattdepot.server.db.memory#getSensorDataStraddleList
    */
   @Override
-  public SensorDataStraddle getSensorDataStraddle(String sourceName, XMLGregorianCalendar timestamp) {
+  public SensorDataStraddle getSensorDataStraddle(Source source, XMLGregorianCalendar timestamp) {
     // This is a kludge, create sentinels for times way outside our expected range
     SensorData beforeSentinel, afterSentinel;
     try {
       beforeSentinel =
           new SensorData(Tstamp.makeTimestamp("1700-01-01T00:00:00.000-10:00"), "", "");
-      afterSentinel = new SensorData(Tstamp.makeTimestamp("3000-01-01T00:00:00.000-10:00"), "", "");
+      afterSentinel =
+          new SensorData(Tstamp.makeTimestamp("3000-01-01T00:00:00.000-10:00"), "", "");
     }
     catch (Exception e) {
       throw new RuntimeException(
@@ -484,18 +502,15 @@ public class MemoryStorageImplementation extends DbImplementation {
     }
     // initialize beforeData & afterData to sentinel values
     SensorData beforeData = beforeSentinel, afterData = afterSentinel;
-    if ((sourceName == null) || (timestamp == null)) {
+    if ((source == null) || (timestamp == null)) {
       return null;
     }
-    Source source = this.name2SourceHash.get(sourceName);
-    if (source == null) {
-      return null;
-    }
+
     XMLGregorianCalendar dataTimestamp;
     int dataTimestampCompare;
     // Retrieve this Source's map of timestamps to SensorData
     ConcurrentMap<XMLGregorianCalendar, SensorData> sensorDataMap =
-        this.source2SensorDatasHash.get(sourceName);
+        this.source2SensorDatasHash.get(source.getName());
     if (sensorDataMap == null) {
       return null;
     }
@@ -527,126 +542,6 @@ public class MemoryStorageImplementation extends DbImplementation {
       else {
         return new SensorDataStraddle(timestamp, beforeData, afterData);
       }
-    }
-  }
-
-  /**
-   * Returns a list of SensorDataStraddles that straddle the given timestamp, using SensorData from
-   * all non-virtual subsources of the given source. If the given source is non-virtual, then the
-   * result will be a list containing at a single SensorDataStraddle, or null. In the case of a
-   * non-virtual source, you might as well use getSensorDataStraddle.
-   * 
-   * @param sourceName The name of the source to generate the straddle from.
-   * @param timestamp The timestamp of interest in the straddle.
-   * @return A list of SensorDataStraddles that straddle the given timestamp. Returns null if:
-   * parameters are null, the source doesn't exist, or there is no sensor data that straddles the
-   * timestamp.
-   * @see org.wattdepot.server.db.memory#getSensorDataStraddle
-   */
-  @Override
-  public List<SensorDataStraddle> getSensorDataStraddleList(String sourceName,
-      XMLGregorianCalendar timestamp) {
-    if ((sourceName == null) || (timestamp == null)) {
-      return null;
-    }
-    Source baseSource = this.name2SourceHash.get(sourceName);
-    if (baseSource == null) {
-      return null;
-    }
-    // Want to go through sensordata for base source, and all subsources recursively
-    List<Source> sourceList = getAllNonVirtualSubSources(baseSource);
-    List<SensorDataStraddle> straddleList = new ArrayList<SensorDataStraddle>(sourceList.size());
-    for (Source subSource : sourceList) {
-      String subSourceName = subSource.getName();
-      SensorDataStraddle straddle = getSensorDataStraddle(subSourceName, timestamp);
-      if (straddle == null) {
-        // No straddle for this timestamp on this source, abort
-        return null;
-      }
-      else {
-        straddleList.add(straddle);
-      }
-    }
-    if (straddleList.isEmpty()) {
-      return null;
-    }
-    else {
-      return straddleList;
-    }
-  }
-
-  /** {@inheritDoc} */
-  @Override
-  public List<StraddleList> getStraddleLists(String sourceName,
-      List<XMLGregorianCalendar> timestampList) {
-    if ((sourceName == null) || (timestampList == null)) {
-      return null;
-    }
-    Source baseSource = this.name2SourceHash.get(sourceName);
-    if (baseSource == null) {
-      return null;
-    }
-    // Want to go through sensordata for base source, and all subsources recursively
-    List<Source> sourceList = getAllNonVirtualSubSources(baseSource);
-    List<StraddleList> masterList = new ArrayList<StraddleList>(sourceList.size());
-    List<SensorDataStraddle> straddleList;
-    for (Source subSource : sourceList) {
-      straddleList = new ArrayList<SensorDataStraddle>(timestampList.size());
-      String subSourceName = subSource.getName();
-      for (XMLGregorianCalendar timestamp : timestampList) {
-        SensorDataStraddle straddle = getSensorDataStraddle(subSourceName, timestamp);
-        if (straddle == null) {
-          // No straddle for this timestamp on this source, abort
-          return null;
-        }
-        else {
-          straddleList.add(straddle);
-        }
-      }
-      if (straddleList.isEmpty()) {
-        return null;
-      }
-      else {
-        masterList.add(new StraddleList(subSource, straddleList));
-      }
-    }
-    return masterList;
-  }
-
-  /** {@inheritDoc} */
-  @Override
-  public List<List<SensorDataStraddle>> getSensorDataStraddleListOfLists(String sourceName,
-      List<XMLGregorianCalendar> timestampList) {
-    List<List<SensorDataStraddle>> masterList = new ArrayList<List<SensorDataStraddle>>();
-    if ((sourceName == null) || (timestampList == null)) {
-      return null;
-    }
-    Source baseSource = this.name2SourceHash.get(sourceName);
-    if (baseSource == null) {
-      return null;
-    }
-    // Want to go through sensordata for base source, and all subsources recursively
-    List<Source> sourceList = getAllNonVirtualSubSources(baseSource);
-    for (Source subSource : sourceList) {
-      List<SensorDataStraddle> straddleList = new ArrayList<SensorDataStraddle>();
-      String subSourceName = subSource.getName();
-      for (XMLGregorianCalendar timestamp : timestampList) {
-        SensorDataStraddle straddle = getSensorDataStraddle(subSourceName, timestamp);
-        if (straddle == null) {
-          // No straddle for this timestamp on this source, abort
-          return null;
-        }
-        else {
-          straddleList.add(straddle);
-        }
-      }
-      masterList.add(straddleList);
-    }
-    if (masterList.isEmpty()) {
-      return null;
-    }
-    else {
-      return masterList;
     }
   }
 

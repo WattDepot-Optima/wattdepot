@@ -4,8 +4,7 @@
 package org.wattdepot.resource.db;
 
 import org.restlet.data.Status;
-import org.restlet.representation.Representation;
-import org.restlet.representation.Variant;
+import org.restlet.resource.Put;
 import org.wattdepot.resource.WattDepotResource;
 
 /**
@@ -18,7 +17,6 @@ public class DatabaseResource extends WattDepotResource {
 
   /** Contains the database method desired. */
   protected String methodString;
-
 
   /**
    * Initialize with attributes from the Request.
@@ -33,34 +31,28 @@ public class DatabaseResource extends WattDepotResource {
    * Implement the PUT method that executes the method provided.
    * 
    * @param entity The entity to be posted.
-   * @param variant The variant of Representation to put.
-   * @return Returns a null Representation.
    */
-  @Override
-  public Representation put(Representation entity, Variant variant) {
-    // If credentials are provided, they need to be valid
-    if (validateCredentials()) {
-      if (isAdminUser()) {
-        if ("snapshot".equalsIgnoreCase(this.methodString)) {
-          if (super.dbManager.makeSnapshot()) {
-            getResponse().setStatus(Status.SUCCESS_CREATED);
-          }
-          else {
-            // all inputs have been validated by this point, so must be internal error
-            setStatusInternalError("Unable to create database snapshot");
-            return null;
-          }
+  @Put
+  public void snapshot(String entity) {
+    if (isAdminUser()) {
+      if ("snapshot".equalsIgnoreCase(this.methodString)) {
+        if (super.dbManager.makeSnapshot()) {
+          getResponse().setStatus(Status.SUCCESS_CREATED);
         }
         else {
-          // Unknown method requested, return error
-          setStatusMiscError("Bad method passed to Database resource");
+          // all inputs have been validated by this point, so must be internal error
+          setStatusInternalError("Unable to create database snapshot");
+          return;
         }
       }
       else {
-        setStatusBadCredentials();
-        return null;
+        // Unknown method requested, return error
+        setStatusMiscError("Bad method passed to Database resource");
       }
     }
-    return null;
+    else {
+      setStatusBadCredentials();
+      return;
+    }
   }
 }

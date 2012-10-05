@@ -3,40 +3,71 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>org.wattdepot</groupId>
-  <artifactId>HerokuWattDepot</artifactId>
-  <version>0.0.1</version>
+  <artifactId>wattdepot</artifactId>
+  <version>2.1</version>
 
   <name>WattDepot</name>
   <url>http://code.google.com/p/wattdepot/</url>
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-	<checkstyle.version>2.8</checkstyle.version>
+	<targetJdk>1.6</targetJdk>
+	<maven.build.timestamp.format>MMdd</maven.build.timestamp.format>
+	<build.version>${project.version}.${maven.build.timestamp}</build.version>
+	
+	<!-- Dependency Versions -->
+	<berkeleydb.version>4.0.92</berkeleydb.version>
 	<commons-cli.version>1.2</commons-cli.version>
 	<commons-lang.version>2.4</commons-lang.version>
 	<commons-logging.version>1.1.1</commons-logging.version>
+	<concurrent.version>1.0</concurrent.version>
+	<dbcp.version>1.4</dbcp.version>
+	<tomcat.jdbc.version>7.0.29</tomcat.jdbc.version>
 	<derby.version>10.5.3.0_1</derby.version>
-	<emma.version>2.0.5312</emma.version>
-	<findbugs.version>2.4.0</findbugs.version>
 	<google-collections.version>1.0-rc2</google-collections.version>
 	<google-visualization-java.version>1.0.2</google-visualization-java.version>
-	<hackystat.version>8.3.1108</hackystat.version>
+	<httpunit.version>1.7</httpunit.version>
 	<icu4j.version>4.0.1</icu4j.version>
-	<javamail.version>1.4.2</javamail.version>
-	<javancss.version>2.0-beta-2</javancss.version>
-	<jetty.version>6.1.9</jetty.version>
 	<jcs.version>1.3</jcs.version>
+	<json.version>20090211</json.version>
 	<junit.version>4.8.2</junit.version>
 	<modbus-jamod.version>1.2</modbus-jamod.version>
 	<opencsv.version>2.0</opencsv.version>
-	<pmd.version>2.6</pmd.version>
-	<restlet.version>2.0.11</restlet.version>
-	<sclc.version>2.7.428</sclc.version>
-	<wicket.version>1.3.6</wicket.version>
-	<berkeleydb.version>4.0.92</berkeleydb.version>
-	<postgres.version>8.3-603.jdbc3</postgres.version>
+	<pool.version>1.5.7</pool.version>
+	<postgres.version>9.1-901.jdbc4</postgres.version>
+	<restlet.version>2.1-RC5</restlet.version>
+	
+	<!-- Maven Plugin Versions -->
+	<antrun.plugin.version>1.7</antrun.plugin.version>
+	<appassembler.plugin.version>1.1.1</appassembler.plugin.version>
+	<assembly.plugin.version>2.3</assembly.plugin.version>
+	<checkstyle.plugin.version>2.8</checkstyle.plugin.version>
+	<findbugs.plugin.version>2.4.0</findbugs.plugin.version>
+	<javadoc.plugin.version>2.8.1</javadoc.plugin.version>
+	<pmd.plugin.version>2.6</pmd.plugin.version>
+	<site.plugin.version>3.0</site.plugin.version>
+	<surefire.plugin.version>2.11</surefire.plugin.version>
+	
+	<config.dir>${basedir}</config.dir>
+	<findbugs.filter.file>${config.dir}/findbugs.exclude.xml</findbugs.filter.file>
+	<checkstyle.filter.file>${config.dir}/checkstyle.xml</checkstyle.filter.file>
   </properties>
  <dependencies>
+	 <dependency>
+		<groupId>commons-pool</groupId>
+		<artifactId>commons-pool</artifactId>
+		<version>${pool.version}</version>
+	</dependency>
+	<dependency>
+		<groupId>commons-dbcp</groupId>
+		<artifactId>commons-dbcp</artifactId>
+		<version>${dbcp.version}</version>
+	</dependency>
+	<dependency>
+    <groupId>org.apache.tomcat</groupId>
+    <artifactId>tomcat-jdbc</artifactId>
+    <version>${tomcat.jdbc.version}</version>
+  </dependency>
     <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
@@ -62,11 +93,6 @@
 		<groupId>net.sf.opencsv</groupId>
 		<artifactId>opencsv</artifactId>
 		<version>${opencsv.version}</version>
-	</dependency>
-	<dependency>
-		<groupId>org.mortbay.jetty</groupId>
-		<artifactId>maven-jetty-plugin</artifactId>
-		<version>${jetty.version}</version>
 	</dependency>
     <dependency>
 		<groupId>com.ibm.icu</groupId>
@@ -97,8 +123,23 @@
 		<groupId>org.restlet.jse</groupId>  
 		<artifactId>org.restlet</artifactId>  
 		<version>${restlet.version}</version>  
-	</dependency>  
-	<dependency>
+	</dependency>
+<!--   <dependency> -->
+<!--     <groupId>org.restlet.jse</groupId> -->
+<!--     <artifactId>org.restlet.ext.jetty</artifactId> -->
+<!--     <version>${restlet.version}</version> -->
+<!--   </dependency> -->
+<!--   <dependency> -->
+<!--     <groupId>org.restlet.jse</groupId> -->
+<!--     <artifactId>org.restlet.ext.simple</artifactId> -->
+<!--     <version>${restlet.version}</version> -->
+<!--   </dependency> -->
+<!--   <dependency> -->
+<!--     <groupId>org.restlet.jse</groupId> -->
+<!--     <artifactId>org.restlet.ext.net</artifactId> -->
+<!--     <version>${restlet.version}</version> -->
+<!--   </dependency> -->
+  <dependency>
 		<groupId>net.wimpi.modbus</groupId>
 		<artifactId>jamod</artifactId>
 		<version>${modbus-jamod.version}</version>
@@ -108,6 +149,23 @@
 		<artifactId>postgresql</artifactId>
 		<version>${postgres.version}</version>
 	</dependency>
+	<dependency>
+		<groupId>httpunit</groupId>
+		<artifactId>httpunit</artifactId>
+		<version>${httpunit.version}</version>
+		<scope>test</scope>
+	</dependency>
+    <dependency>
+		<groupId>org.json</groupId>
+		<artifactId>json</artifactId>
+		<version>${json.version}</version>
+		<scope>test</scope>
+	</dependency> 
+	<dependency>
+		<groupId>org.apache.jcs</groupId>
+		<artifactId>jcs</artifactId>
+		<version>${jcs.version}</version>
+	</dependency>       	
 </dependencies>
 <repositories>
 	<repository>
@@ -124,382 +182,363 @@
 		<name>Public online Restlet repository</name>  
 		<url>http://maven.restlet.org</url>  
 	</repository> 
-	<repository>
-        <snapshots>
-			<enabled>false</enabled>
-        </snapshots>
+	<!--<repository>
         <id>artifactory</id>
-        <name>repo</name>
+        <name>Repository that contains modbus</name>
         <url>http://maven.etl.luc.edu/artifactory/repo</url>
-	</repository> 
+	</repository> -->
+	<repository>
+        <id>local-repo</id>
+        <name>Local repository that contains modbus</name>
+        <url>file://${project.basedir}/repository</url>
+	</repository>
 </repositories>
-<reporting>
-	<plugins>
-	<plugin>
-		<groupId>org.codehaus.mojo</groupId>
-		<artifactId>findbugs-maven-plugin</artifactId>
-		<version>${findbugs.version}</version>
-		<configuration>
-		    <excludeFilterFile>src/main/resources/xml/configfiles/hackystat.findbugs.exclude.xml</excludeFilterFile>
-			<excludes>**/jaxb/**, **/tinker/**</excludes>
-		</configuration>
-	</plugin>
-	<plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-checkstyle-plugin</artifactId>
-        <version>${checkstyle.version}</version>
-		<configuration>
-          <configLocation>src/main/resources/xml/configfiles/wattdepot.checkstyle.xml</configLocation>
-		  <excludes>**/jaxb/**, **/tinker/**</excludes>
-        </configuration>
-    </plugin>
-	<plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-pmd-plugin</artifactId>
-        <version>${pmd.version}</version>
-		<reportSets>
-          <reportSet>
-            <reports>
-              <report>pmd</report>
-              <report>cpd</report>
-            </reports>
-          </reportSet>
-        </reportSets>
-		<configuration>
-			<ruleset>src/main/resources/xml/configfiles/hackystat.pmd.xml</ruleset>
-			<linkXref>true</linkXref>
-			<sourceEncoding>utf-8</sourceEncoding>
-			<minimumTokens>100</minimumTokens>
-			<targetJdk>1.6</targetJdk>
-			<excludes>
-				<exclude>**/tinker/**</exclude>
-				<exclude>**/jaxb/**</exclude>
-			</excludes>
-		</configuration>
-    </plugin>
-    <plugin>
-        <groupId>org.codehaus.mojo</groupId>
-        <artifactId>javancss-maven-plugin</artifactId>
-        <version>${javancss.version}</version>
-    </plugin>
-	<plugin>
-		<groupId>org.jacoco</groupId>
-		<artifactId>jacoco-maven-plugin</artifactId>
-		<version>0.5.5.201112152213</version>
-	</plugin>
-	</plugins>
-</reporting>
 <build>
 	<defaultGoal>verify</defaultGoal>
 	<plugins>
-	<!-- Package it up for Heroku -->
-	<plugin>
-        <groupId>org.codehaus.mojo</groupId>
-        <artifactId>appassembler-maven-plugin</artifactId>
-        <version>1.1.1</version>
-        <executions>
-            <execution>
-                <phase>package</phase>
-                <goals><goal>assemble</goal></goals>
-                <configuration>
-                    <assembleDirectory>target</assembleDirectory>
-                    <programs>
-                        <program>
-                            <mainClass>org.wattdepot.server.Server</mainClass>
-                            <name>webapp</name>
-                        </program>
-                    </programs>
-                </configuration>
-            </execution>
-        </executions>
-    </plugin>
-	<plugin>
-		<groupId>org.codehaus.mojo</groupId>
-		<artifactId>findbugs-maven-plugin</artifactId>
-		<version>${findbugs.version}</version>
-		<configuration>
-			<excludes>**/jaxb/**, **/tinker/**</excludes>
-		</configuration>
-		<executions>
-			<execution>
-				<phase>verify</phase>
-			</execution>
-		</executions>
-    </plugin>
-	<plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-checkstyle-plugin</artifactId>
-        <version>${checkstyle.version}</version>
-		<configuration>
-			<excludes>**/jaxb/**, **/tinker/**</excludes>
-		</configuration>
-		<executions>
-			<execution>
-				<phase>verify</phase>
-			</execution>
-		</executions>
-    </plugin>
-	<plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-pmd-plugin</artifactId>
-        <version>${pmd.version}</version>
-		<executions>
-			<execution>
-				<phase>verify</phase>
-			</execution>
-		</executions>
-		<configuration>
-			<linkXref>true</linkXref>
-			<sourceEncoding>utf-8</sourceEncoding>
-			<minimumTokens>100</minimumTokens>
-			<targetJdk>1.6</targetJdk>
-			<excludes>
-				<exclude>**/tinker/**</exclude>
-				<exclude>**/jaxb/**</exclude>
-			</excludes>
-		</configuration>
-     </plugin>
-     <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-surefire-plugin</artifactId>
-        <version>2.11</version>
-		<configuration>
-					<excludes>
-						<exclude>**/tinker/**</exclude>
-						<exclude>**/TestDb*.java</exclude>
-						<exclude>**/TestDerbyStorageImplementation.java</exclude>
-						<exclude>**/TestBerkeleyDbImplementation.java</exclude>
-						<exclude>**/TestPostgresImplementation.java</exclude>
-						<exclude>**/StressTest.java</exclude>
-					</excludes>
-				</configuration>
-        <executions>
-			<execution>
-				<id>non-DB tests</id>
+		<!-- Run JUnit tests during "test" phase -->
+		<plugin>
+			<groupId>org.apache.maven.plugins</groupId>
+			<artifactId>maven-surefire-plugin</artifactId>
+			<version>${surefire.plugin.version}</version>
+			<configuration>
+				<excludes>
+					<exclude>**/tinker/**</exclude>
+					<exclude>**/TestDb*.java</exclude>
+					<exclude>**/TestDerbyStorageImplementation.java</exclude>
+					<exclude>**/TestBerkeleyDbImplementation.java</exclude>
+					<exclude>**/TestPostgresStorageImplementation.java</exclude>
+					<exclude>**/StressTest.java</exclude>
+					<exclude>**/TestDatabaseResource.java</exclude>
+				</excludes>
+			</configuration>
+			<executions>
+				<execution>
+					<id>Memory-Storage-Implementation tests</id>
+					<phase>test</phase>
+					<goals>
+						<goal>test</goal>
+					</goals>
+					<configuration>
+						<systemPropertyVariables>
+							<wattdepot-server.db.impl>org.wattdepot.server.db.memory.MemoryStorageImplementation</wattdepot-server.db.impl>
+						</systemPropertyVariables>
+						<includes>
+							<include>**/TestDb*.java</include>
+							<include>**/TestDatabaseResource.java</include>
+						</includes>
+						<excludes>
+							<exclude>**/tinker/**</exclude>
+							<exclude>**/TestDerbyStorageImplementation.java</exclude>
+							<exclude>**/TestBerkeleyDbImplementation.java</exclude>
+							<exclude>**/TestPostgresStorageImplementation.java</exclude>
+							<exclude>**/StressTest.java</exclude>
+						</excludes>
+					</configuration>
+				</execution>
+				<execution>
+					<id>Derby-Storage-Implementation tests</id>
+					<phase>test</phase>
+					<goals>
+						<goal>test</goal>
+					</goals>
+					<configuration>
+						<systemPropertyVariables>
+							<wattdepot-server.db.impl>org.wattdepot.server.db.derby.DerbyStorageImplementation</wattdepot-server.db.impl>
+						</systemPropertyVariables>
+						<includes>
+							<include>**/TestDb*.java</include>
+							<include>**/TestDerbyStorageImplementation.java</include>
+							<include>**/TestDatabaseResource.java</include>
+						</includes>
+						<excludes>
+							<exclude>**/tinker/**</exclude>
+							<exclude>**/TestBerkeleyDbImplementation.java</exclude>
+							<exclude>**/TestPostgresStorageImplementation.java</exclude>
+							<exclude>**/StressTest.java</exclude>
+						</excludes>
+					</configuration>
+				</execution>
+				<execution>
+					<id>Berkeley-DB-Implementation tests</id>
+					<phase>test</phase>
+					<goals>
+						<goal>test</goal>
+					</goals>
+					<configuration>
+						<systemPropertyVariables>
+							<wattdepot-server.db.impl>org.wattdepot.server.db.berkeleydb.BerkeleyDbImplementation</wattdepot-server.db.impl>
+						</systemPropertyVariables>
+						<includes>
+							<include>**/TestDb*.java</include>
+							<include>**/TestBerkeleyDbImplementation.java</include>
+							<include>**/TestDatabaseResource.java</include>
+						</includes>
+						<excludes>
+							<exclude>**/tinker/**</exclude>
+							<exclude>**/TestDerbyStorageImplementation.java</exclude>
+							<exclude>**/TestPostgresStorageImplementation.java</exclude>
+							<exclude>**/StressTest.java</exclude>
+						</excludes>
+					</configuration>
+				</execution>
+				<execution>
+					<id>Postgres-Implementation tests</id>
+					<phase>test</phase>
+					<goals>
+						<goal>test</goal>
+					</goals>
+					<configuration>
+						<systemPropertyVariables>
+							<wattdepot-server.db.impl>org.wattdepot.server.db.postgres.PostgresStorageImplementation</wattdepot-server.db.impl>
+						</systemPropertyVariables>
+						<includes>
+							<include>**/TestDb*.java</include>
+							<include>**/TestPostgresStorageImplementation.java</include>
+						</includes>
+						<excludes>
+							<exclude>**/tinker/**</exclude>
+							<exclude>**/TestDerbyStorageImplementation.java</exclude>
+							<exclude>**/TestBerkeleyDbImplementation.java</exclude>
+							<exclude>**/StressTest.java</exclude>
+							<!-- snapshot doesn't work with Postgres -->
+							<exclude>**/TestDbManagerSnapshot.java</exclude>
+							<exclude>**/TestDatabaseResource.java</exclude>
+						</excludes>
+					</configuration>
+				</execution>
+			</executions>
+		</plugin>
+		<!-- Run QA tools during "test" phase -->
+		<plugin>
+			<groupId>org.codehaus.mojo</groupId>
+			<artifactId>findbugs-maven-plugin</artifactId>
+			<version>${findbugs.plugin.version}</version>
+			<configuration>
+				<excludeFilterFile>${findbugs.filter.file}</excludeFilterFile>
+				<excludes><exclude>**/jaxb/**</exclude><exclude>**/tinker/**</exclude></excludes>
+			</configuration>
+			 <executions>
+			 <execution>
+					<phase>test</phase>
+					<goals><goal>check</goal></goals>
+				</execution>
+			</executions>
+		</plugin>
+		<plugin>
+			<groupId>org.apache.maven.plugins</groupId>
+			<artifactId>maven-checkstyle-plugin</artifactId>
+			<version>${checkstyle.plugin.version}</version>
+			<configuration>
+			  <configLocation>${checkstyle.filter.file}</configLocation>
+			  <excludes>**/tinker/**, **/jaxb/**
+				</excludes>
+			</configuration>
+			 <executions>
+			 <execution>
+					<phase>test</phase>
+					<goals><goal>check</goal></goals>
+				</execution>
+			</executions>
+		</plugin>
+		<plugin>
+			<groupId>org.apache.maven.plugins</groupId>
+			<artifactId>maven-pmd-plugin</artifactId>
+			<version>${pmd.plugin.version}</version>
+			<configuration>
+				<targetJdk>${targetJdk}</targetJdk>
+				<linkXref>false</linkXref>
+				<sourceEncoding>${project.build.sourceEncoding}</sourceEncoding>
+				<minimumTokens>100</minimumTokens>
+				<excludes>
+					<exclude>**/tinker/**</exclude>
+					<exclude>**/jaxb/**</exclude>
+				</excludes>
+			</configuration>
+			 <executions>
+				<execution>
+					<phase>test</phase>
+					<goals><goal>check</goal></goals>
+				</execution>
+			</executions>
+		</plugin>
+		<plugin>
+			<groupId>org.apache.maven.plugins</groupId>
+			<artifactId>maven-javadoc-plugin</artifactId>
+			<version>${javadoc.plugin.version}</version>
+			<executions>
+				<execution>
 				<phase>test</phase>
 				<goals>
-					<goal>test</goal>
+					<goal>javadoc</goal>
+					<goal>test-javadoc</goal>
 				</goals>
-			</execution>
-			<execution>
-				<id>Memory-Storage-Implementation tests</id>
-				<phase>test</phase>
-				<goals>
-					<goal>test</goal>
-				</goals>
+				</execution>
+			</executions>
+		</plugin>
+		<!-- Run QA & Reporting tools during "site" phase -->
+		<plugin>
+			<groupId>org.apache.maven.plugins</groupId>
+			<artifactId>maven-site-plugin</artifactId>
+			<version>${site.plugin.version}</version>
+			<configuration>
+				<reportPlugins>
+				<plugin>
+					<groupId>org.codehaus.mojo</groupId>
+					<artifactId>findbugs-maven-plugin</artifactId>
+					<version>${findbugs.plugin.version}</version>
+					<configuration>
+						<excludeFilterFile>${findbugs.filter.file}</excludeFilterFile>
+						<excludes><exclude>**/jaxb/**</exclude><exclude>**/tinker/**</exclude></excludes>
+					</configuration>
+				</plugin>
+				<plugin>
+					<groupId>org.apache.maven.plugins</groupId>
+					<artifactId>maven-checkstyle-plugin</artifactId>
+					<version>${checkstyle.plugin.version}</version>
+					<configuration>
+					  <configLocation>${checkstyle.filter.file}</configLocation>
+					  <excludes>**/jaxb/**, **/tinker/**</excludes>
+					</configuration>
+				</plugin>
+				<plugin>
+					<groupId>org.apache.maven.plugins</groupId>
+					<artifactId>maven-pmd-plugin</artifactId>
+					<version>${pmd.plugin.version}</version>
+					<reportSets>
+					  <reportSet>
+						<reports>
+						  <report>pmd</report>
+						  <report>cpd</report>
+						</reports>
+					  </reportSet>
+					</reportSets>
+					<configuration>
+						<targetJdk>${targetJdk}</targetJdk>
+						<linkXref>false</linkXref>
+						<sourceEncoding>${project.build.sourceEncoding}</sourceEncoding>
+						<minimumTokens>100</minimumTokens>
+						<excludes>
+							<exclude>**/tinker/**</exclude>
+							<exclude>**/jaxb/**</exclude>
+						</excludes>
+					</configuration>
+				</plugin>
+				<plugin>
+					<groupId>org.apache.maven.plugins</groupId>
+					<artifactId>maven-javadoc-plugin</artifactId>
+					<version>${javadoc.plugin.version}</version>
+				</plugin>
+				</reportPlugins>
+			</configuration>
+		</plugin>
+		<!-- Ant tasks from anttasks.xml. These could be ported to Maven, but I haven't taken the time to do it. -->
+		<plugin>
+			<artifactId>maven-antrun-plugin</artifactId>
+			<version>${antrun.plugin.version}</version>
+			<executions>
+			<!-- Create jars during "package" phase -->
+			  <execution>
+				<id>jar</id>
+				<phase>package</phase>
 				<configuration>
-					<systemPropertyVariables>
-						<wattdepot-server.db.impl>org.wattdepot.server.db.memory.MemoryStorageImplementation</wattdepot-server.db.impl>
-					</systemPropertyVariables>
-					<includes>
-						<include>**/TestDb*.java</include>
-					</includes>
+				  <tasks>
+					<ant antfile="${config.dir}/anttasks.build.xml" target="jar-standalone"/>
+				  </tasks>
 				</configuration>
-			</execution>
-			<execution>
-				<id>Derby-Storage-Implementation tests</id>
-				<phase>test</phase>
 				<goals>
-					<goal>test</goal>
+				  <goal>run</goal>
 				</goals>
+			  </execution>
+			  <!-- Autogenerate jaxb classes, destroying any custom code in those classes.
+			  This is not part of any phase, but can be called with "mvn antrun:run execution:jaxb"
+			  I haven't tested this, so no guarantees on whether it works or not. -->
+			  <execution>
+				<id>jaxb</id>
+				<phase></phase>
 				<configuration>
-					<systemPropertyVariables>
-						<wattdepot-server.db.impl>org.wattdepot.server.db.derby.DerbyStorageImplementation</wattdepot-server.db.impl>
-					</systemPropertyVariables>
-					<includes>
-						<include>**/TestDerbyStorageImplementation.java</include>
-					</includes>
+				  <tasks>
+					<ant antfile="${config.dir}/anttasks.build.xml" target="jar-standalone"/>
+				  </tasks>
 				</configuration>
-			</execution>
-			<execution>
-				<id>Berkeley-DB-Implementation tests</id>
-				<phase>test</phase>
 				<goals>
-					<goal>test</goal>
+				  <goal>run</goal>
 				</goals>
+			  </execution>
+			</executions>
+		</plugin>
+		<!-- Create distribution during "package" phase -->
+		<plugin>
+			<artifactId>maven-assembly-plugin</artifactId>
+			<version>${assembly.plugin.version}</version>
+			<executions>
+			<!-- zip source -->
+			<execution>
+				<id>source</id>
+				<phase>package</phase>
+				<goals><goal>single</goal></goals>
 				<configuration>
-					<systemPropertyVariables>
-						<wattdepot-server.db.impl>org.wattdepot.server.db.berkeleydb.BerkeleyDbImplementation</wattdepot-server.db.impl>
-					</systemPropertyVariables>
-					<includes>
-						<include>**/TestBerkeleyDbImplementation.java</include>
-					</includes>
+					<finalName>${project.artifactId}</finalName>
+					<outputDirectory>${project.build.directory}/jar</outputDirectory>
+					<formats><format>zip</format></formats>
+					<descriptorRefs>
+						<descriptorRef>src</descriptorRef>
+					</descriptorRefs>
 				</configuration>
 			</execution>
-		</executions>
-      </plugin>
-	  <plugin>
-        <artifactId>maven-antrun-plugin</artifactId>
-        <version>1.7</version>
-        <executions>
-          <execution>
-            <phase>package</phase>
-            <configuration>
-              <target>
-				<property name="tmp.dir" location="${project.build.directory}/tmp" />
-				<property name="build.jar.dir" location="${project.build.directory}/jar" />
-				<!-- Define the directories and distribution name -->
-				<delete dir="${tmp.dir}" quiet="yes" />
-				<mkdir dir="${tmp.dir}" />
-				<mkdir dir="${build.jar.dir}" />
-				<!-- Copy over all local classes -->
-				<copy todir="${tmp.dir}">
-				  <fileset dir="${project.build.outputDirectory}" />
-				</copy>
-				
-				<!-- Unjar the libraries required for client (subset of those needed for server) -->
-				<unjar src="${settings.localRepository}/org/restlet/jse/org.restlet/${restlet.version}/org.restlet-${restlet.version}.jar" dest="${tmp.dir}" />
-				
-				<jar destfile="${build.jar.dir}/wattdepot-lib-client.jar" basedir="${tmp.dir}">
-				  <manifest>
-					<attribute name="Implementation-Title" value="WattDepot client library" />
-					<attribute name="Implementation-Version" value="${maven.project.version}" />
-					<attribute name="Implementation-Vendor"
-							   value="Collaborative Software Development Laboratory, University of Hawaii" />
-				  </manifest>
-				</jar>
-				
-				<unjar src="${settings.localRepository}/commons-cli/commons-cli/${commons-cli.version}/commons-cli-${commons-cli.version}.jar" dest="${tmp.dir}" />
-				
-				<jar destfile="${build.jar.dir}/wattdepot-sensor-examplestreaming.jar" basedir="${tmp.dir}">
-				  <manifest>
-					<attribute name="Main-Class" value="org.wattdepot.datainput.ExampleStreamingSensor" />
-					<attribute name="Implementation-Title" value="WattDepot ExampleStreamingSensor" />
-					<attribute name="Implementation-Version" value="${maven.project.version}" />
-					<attribute name="Implementation-Vendor"
-							   value="Collaborative Software Development Laboratory, University of Hawaii" />
-				  </manifest>
-				</jar>
-
-				<jar destfile="${build.jar.dir}/wattdepot-sensor-ted5000.jar" basedir="${tmp.dir}">
-				  <manifest>
-					<attribute name="Main-Class" value="org.wattdepot.sensor.ted.Ted5000Sensor" />
-					<attribute name="Implementation-Title" value="WattDepot TED 5000 Sensor" />
-					<attribute name="Implementation-Version" value="${maven.project.version}" />
-					<attribute name="Implementation-Vendor"
-							   value="Collaborative Software Development Laboratory, University of Hawaii" />
-				  </manifest>
-				</jar>
-
-				<jar destfile="${build.jar.dir}/wattdepot-client-monitor.jar" basedir="${tmp.dir}">
-				  <manifest>
-					<attribute name="Main-Class" value="org.wattdepot.client.monitor.MonitorSourceClient" />
-					<attribute name="Implementation-Title" value="WattDepot MonitorSourceClient" />
-					<attribute name="Implementation-Version" value="${maven.project.version}" />
-					<attribute name="Implementation-Vendor"
-							   value="Collaborative Software Development Laboratory, University of Hawaii" />
-				  </manifest>
-				</jar>
-
-				<jar destfile="${build.jar.dir}/wattdepot-client-snapshot.jar" basedir="${tmp.dir}">
-				  <manifest>
-					<attribute name="Main-Class" value="org.wattdepot.client.snapshot.SnapshotClient" />
-					<attribute name="Implementation-Title" value="WattDepot SnapshotClient" />
-					<attribute name="Implementation-Version" value="${maven.project.version}" />
-					<attribute name="Implementation-Vendor"
-							   value="Collaborative Software Development Laboratory, University of Hawaii" />
-				  </manifest>
-				</jar>
-
-				<jar destfile="${build.jar.dir}/wattdepot-converter-log.jar" basedir="${tmp.dir}">
-				  <manifest>
-					<attribute name="Main-Class" value="org.wattdepot.datainput.SensorLogDataConverter" />
-					<attribute name="Implementation-Title" value="WattDepot SensorLogDataConverter" />
-					<attribute name="Implementation-Version" value="${maven.project.version}" />
-					<attribute name="Implementation-Vendor"
-							   value="Collaborative Software Development Laboratory, University of Hawaii" />
-				  </manifest>
-				</jar>
-
-				<unjar src="${settings.localRepository}/net/sf/opencsv/opencsv/${opencsv.version}/opencsv-${opencsv.version}.jar" dest="${tmp.dir}" />
-
-				<jar destfile="${build.jar.dir}/wattdepot-sensor-tabular.jar" basedir="${tmp.dir}">
-				  <manifest>
-					<attribute name="Main-Class" value="org.wattdepot.datainput.TabularFileSensor" />
-					<attribute name="Implementation-Title" value="WattDepot TabularFileSensor" />
-					<attribute name="Implementation-Version" value="${maven.project.version}" />
-					<attribute name="Implementation-Vendor"
-							   value="Collaborative Software Development Laboratory, University of Hawaii" />
-				  </manifest>
-				</jar>
-
-				<jar destfile="${build.jar.dir}/wattdepot-converter-shark.jar" basedir="${tmp.dir}">
-				  <manifest>
-					<attribute name="Main-Class" value="org.wattdepot.datainput.SharkLogSensor" />
-					<attribute name="Implementation-Title" value="WattDepot SharkLogSensor" />
-					<attribute name="Implementation-Version" value="${maven.project.version}" />
-					<attribute name="Implementation-Vendor"
-							   value="Collaborative Software Development Laboratory, University of Hawaii" />
-				  </manifest>
-				</jar>
-
-				<jar destfile="${build.jar.dir}/wattdepot-sensor-bmo.jar" basedir="${tmp.dir}">
-				  <manifest>
-					<attribute name="Main-Class" value="org.wattdepot.datainput.BMOSensor" />
-					<attribute name="Implementation-Title" value="WattDepot BMOSensor" />
-					<attribute name="Implementation-Version" value="${maven.project.version}" />
-					<attribute name="Implementation-Vendor"
-							   value="Collaborative Software Development Laboratory, University of Hawaii" />
-				  </manifest>
-				</jar>
-
-				<jar destfile="${build.jar.dir}/wattdepot-converter-oscar.jar" basedir="${tmp.dir}">
-				  <manifest>
-					<attribute name="Main-Class" value="org.wattdepot.datainput.OscarDataConverter" />
-					<attribute name="Implementation-Title" value="WattDepot OscarDataConverter" />
-					<attribute name="Implementation-Version" value="${maven.project.version}" />
-					<attribute name="Implementation-Vendor"
-							   value="Collaborative Software Development Laboratory, University of Hawaii" />
-				  </manifest>
-				</jar>
-
-				<!-- This is a bit of a kludge, as only this jar file needs the Jamod library -->
-				<unjar src="${settings.localRepository}/net/wimpi/modbus/jamod/${modbus-jamod.version}/jamod-${modbus-jamod.version}.jar" dest="${tmp.dir}" />
-				<jar destfile="${build.jar.dir}/wattdepot-sensor-shark.jar" basedir="${tmp.dir}">
-				  <manifest>
-					<attribute name="Main-Class" value="org.wattdepot.sensor.modbus.SharkSensor" />
-					<attribute name="Implementation-Title" value="WattDepot SharkSensor" />
-					<attribute name="Implementation-Version" value="${maven.project.version}" />
-					<attribute name="Implementation-Vendor"
-							   value="Collaborative Software Development Laboratory, University of Hawaii" />
-				  </manifest>
-				</jar>
-
-				<!-- Unjar the additional libraries required for server -->
-				<unjar src="${settings.localRepository}/commons-lang/commons-lang/${commons-lang.version}/commons-lang-${commons-lang.version}.jar" dest="${tmp.dir}" />
-				<unjar src="${settings.localRepository}/commons-logging/commons-logging/${commons-logging.version}/commons-logging-${commons-logging.version}.jar" dest="${tmp.dir}" />
-				<unjar src="${settings.localRepository}/org/mortbay/jetty/servlet-api-2.5/${jetty.version}/servlet-api-2.5-${jetty.version}.jar" dest="${tmp.dir}" />
-				<unjar src="${settings.localRepository}/org/mortbay/jetty/jetty/${jetty.version}/jetty-${jetty.version}.jar" dest="${tmp.dir}" />
-				<unjar src="${settings.localRepository}/org/mortbay/jetty/jetty-util/${jetty.version}/jetty-util-${jetty.version}.jar" dest="${tmp.dir}" />
-				<unjar src="${settings.localRepository}/com/ibm/icu/icu4j/${icu4j.version}/icu4j-${icu4j.version}.jar" dest="${tmp.dir}" />
-				<unjar src="${settings.localRepository}/com/google/collections/google-collections/${google-collections.version}/google-collections-${google-collections.version}.jar" dest="${tmp.dir}" />
-				<unjar src="${settings.localRepository}/com/google/visualization/visualization-datasource/${google-visualization-java.version}/visualization-datasource-${google-visualization-java.version}.jar" dest="${tmp.dir}" />
-				<unjar src="${settings.localRepository}/org/apache/derby/derby/${derby.version}/derby-${derby.version}.jar" dest="${tmp.dir}" />
-
-				<jar destfile="${build.jar.dir}/wattdepot-server.jar" basedir="${tmp.dir}">
-				  <manifest>
-					<attribute name="Main-Class" value="org.wattdepot.server.Server" />
-					<attribute name="Implementation-Title" value="WattDepot Server" />
-					<attribute name="Implementation-Version" value="${maven.project.version}" />
-					<attribute name="Implementation-Vendor"
-							   value="Collaborative Software Development Laboratory, University of Hawaii" />
-				  </manifest>
-				</jar>
-				<delete dir="${tmp.dir}" />
-
-              </target>
-            </configuration>
-            <goals>
-              <goal>run</goal>
-            </goals>
-          </execution>
-        </executions>
-      </plugin>
-    </plugins>
+			<!-- zip javadocs -->
+			<execution>
+				<id>javadoc</id>
+				<phase>package</phase>
+				<goals><goal>single</goal></goals>
+				<configuration>
+					<finalName>${project.artifactId}</finalName>
+					<outputDirectory>${project.build.directory}/jar</outputDirectory>
+					<formats><format>zip</format></formats>
+					<descriptors><descriptor>${config.dir}/javadoc-assembly.xml</descriptor></descriptors>
+				</configuration>
+			</execution>
+			<!-- zip project -->
+			<execution>
+				<id>dist</id>
+				<phase>package</phase>
+				<goals><goal>single</goal></goals>
+				<configuration>
+					<finalName>${project.artifactId}-${build.version}</finalName>
+					<outputDirectory>${project.build.directory}/dist</outputDirectory>
+					<formats><format>zip</format></formats>
+					<filters>
+						<filter>.git/**</filter>
+					</filters>
+					<descriptors>
+						<descriptor>${config.dir}/distribution-assembly.xml</descriptor>
+					</descriptors>
+				</configuration>
+			</execution>
+			</executions>
+		</plugin>
+		<!-- Package it up for Heroku during "package" phase -->
+		<plugin>
+			<groupId>org.codehaus.mojo
+			</groupId>
+			<artifactId>appassembler-maven-plugin</artifactId>
+			<version>${appassembler.plugin.version}</version>
+			<executions>
+				<execution>
+					<phase>package</phase>
+					<goals><goal>assemble</goal></goals>
+					<configuration>
+						<assembleDirectory>target</assembleDirectory>
+						<programs>
+							<program>
+								<mainClass>org.wattdepot.server.Server</mainClass>
+								<name>webapp</name>
+							</program>
+						</programs>
+					</configuration>
+				</execution>
+			</executions>
+		</plugin>
+	</plugins>
 </build>
-
-<issueManagement>
-    <system>Google Project Hosting</system>
-    <url>http://code.google.com/p/wattdepot/issues/list</url>
-</issueManagement>
 </project>

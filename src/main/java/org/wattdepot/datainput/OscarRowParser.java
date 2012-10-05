@@ -29,6 +29,7 @@ public class OscarRowParser extends RowParser {
    */
   // Is there a better way to do this (prevent a superclass's constructor from being
   // called)?
+  @SuppressWarnings("PMD.UnusedFormalParameter")
   private OscarRowParser(String toolName, String serverUri, String sourceName) {
     super(toolName, serverUri, null);
   }

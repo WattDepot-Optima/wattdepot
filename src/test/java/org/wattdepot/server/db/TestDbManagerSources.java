@@ -2,6 +2,7 @@ package org.wattdepot.server.db;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
@@ -14,8 +15,10 @@ import org.wattdepot.resource.source.jaxb.Source;
 import org.wattdepot.resource.source.jaxb.SourceIndex;
 import org.wattdepot.resource.source.jaxb.SourceRef;
 import org.wattdepot.resource.source.jaxb.Sources;
+import org.wattdepot.resource.source.jaxb.SubSources;
 import org.wattdepot.resource.source.summary.jaxb.SourceSummary;
 import org.wattdepot.resource.user.jaxb.User;
+import org.wattdepot.util.UriUtils;
 import org.wattdepot.util.tstamp.Tstamp;
 
 /**
@@ -68,8 +71,8 @@ public class TestDbManagerSources extends DbManagerTestHelper {
     storeTestUsers();
 
     // case #1: empty database should have no Sources
-    assertTrue("Freshly created database contains Sources", manager.getSourceIndex().getSourceRef()
-        .isEmpty());
+    assertTrue("Freshly created database contains Sources", manager.getSourceIndex()
+        .getSourceRef().isEmpty());
     assertTrue("Freshly created database contains Sources", manager.getSources().getSource()
         .isEmpty());
 
@@ -78,7 +81,8 @@ public class TestDbManagerSources extends DbManagerTestHelper {
     assertTrue(UNABLE_TO_STORE_SOURCE, manager.storeSource(this.source1));
     index = manager.getSourceIndex();
     sources = manager.getSources();
-    assertSame("getSourceIndex returned wrong number of SourceRefs", index.getSourceRef().size(), 1);
+    assertSame("getSourceIndex returned wrong number of SourceRefs", index.getSourceRef().size(),
+        1);
     assertSame("getSources returned wrong number of SourceRefs", sources.getSource().size(), 1);
     SourceRef aRef = index.getSourceRef().get(0);
     Source source = sources.getSource().get(0);
@@ -91,7 +95,8 @@ public class TestDbManagerSources extends DbManagerTestHelper {
     assertTrue(UNABLE_TO_STORE_SOURCE, manager.storeSource(this.source3));
     index = manager.getSourceIndex();
     sources = manager.getSources();
-    assertSame("getSourceIndex returned wrong number of SourceRefs", index.getSourceRef().size(), 3);
+    assertSame("getSourceIndex returned wrong number of SourceRefs", index.getSourceRef().size(),
+        3);
     assertSame("getSources returned wrong number of Sources", sources.getSource().size(), 3);
     // Now compare the SourceRefs to the original Sources
     List<SourceRef> retrievedRefs = manager.getSourceIndex().getSourceRef();
@@ -116,8 +121,8 @@ public class TestDbManagerSources extends DbManagerTestHelper {
     origSources.add(this.source1);
     origSources.add(this.source3);
     for (int i = 0; i < origSources.size(); i++) {
-      assertTrue("getSources index not sorted", retrievedRefs.get(i).equalsSource(
-          origSources.get(i)));
+      assertTrue("getSources index not sorted",
+          retrievedRefs.get(i).equalsSource(origSources.get(i)));
     }
     assertEquals("getSources returned incorrect list", origSources, manager.getSources()
         .getSource());
@@ -180,9 +185,9 @@ public class TestDbManagerSources extends DbManagerTestHelper {
     SensorData data1 = makeTestSensorData1(), data2 = makeTestSensorData2(), data3 =
         makeTestSensorData3();
 
-    assertTrue(UNABLE_TO_STORE_DATA, manager.storeSensorData(data1));
-    assertTrue(UNABLE_TO_STORE_DATA, manager.storeSensorData(data2));
-    assertTrue(UNABLE_TO_STORE_DATA, manager.storeSensorData(data3));
+    assertTrue(UNABLE_TO_STORE_DATA, manager.storeSensorDataNoCache(data1));
+    assertTrue(UNABLE_TO_STORE_DATA, manager.storeSensorDataNoCache(data2));
+    assertTrue(UNABLE_TO_STORE_DATA, manager.storeSensorDataNoCache(data3));
 
     // retrieve summary for stored Source
     SourceSummary expectedSummary = new SourceSummary();
@@ -201,25 +206,56 @@ public class TestDbManagerSources extends DbManagerTestHelper {
     assertTrue(UNABLE_TO_STORE_SOURCE, manager.storeSource(this.source3));
     SensorData data4 = new SensorData(earlyTimestamp, "JUnit", this.source2.toUri(server));
     SensorData data5 = new SensorData(lateTimestamp, "JUnit", this.source2.toUri(server));
-    assertTrue(UNABLE_TO_STORE_DATA, manager.storeSensorData(data4));
-    assertTrue(UNABLE_TO_STORE_DATA, manager.storeSensorData(data5));
+    assertTrue(UNABLE_TO_STORE_DATA, manager.storeSensorDataNoCache(data4));
+    assertTrue(UNABLE_TO_STORE_DATA, manager.storeSensorDataNoCache(data5));
     retreivedSummary = manager.getSourceSummary(this.source3.getName());
-    assertEquals("Number of sensordata in summary for virtual source is wrong", 5, retreivedSummary
-        .getTotalSensorDatas());
+    assertEquals("Number of sensordata in summary for virtual source is wrong", 5,
+        retreivedSummary.getTotalSensorDatas());
     assertEquals("First sensordata in summary for virtual source is wrong", earlyTimestamp,
         retreivedSummary.getFirstSensorData());
     assertEquals("Last sensordata in summary for virtual source is wrong", lateTimestamp,
         retreivedSummary.getLastSensorData());
 
     // retrieve summary for unknown Source name
-    assertNull("Able to retrieve ficticiously-named Source", manager
-        .getSourceSummary("bogus-source"));
+    assertNull("Able to retrieve ficticiously-named Source",
+        manager.getSourceSummary("bogus-source"));
 
     // retrieve summary for empty Source name
     assertNull("Able to retrieve empty-named Source", manager.getSourceSummary(""));
 
     // retrieve summary for null Source name
     assertNull("Able to retrieve from null Source", manager.getSourceSummary(null));
+  }
+
+  /**
+   * Tests that a virtual source with no subsources produces the correct source summary. Note that
+   * the client doesn't allow this situation to happen, but if the sources are created in another
+   * way there could be an issue.
+   * 
+   * In order to test this, create a virtual source with a subsource and then delete the subsource.
+   */
+  @Test
+  public void getEmptySourceSummary() {
+    User owner = this.makeTestUser1();
+    assertTrue("Could not store user", manager.storeUser(owner));
+    Source subsource = this.makeTestSource1();
+    assertTrue("Could not store source", manager.storeSource(subsource));
+
+    SubSources s = new SubSources();
+    s.getHref().add(Source.sourceToUri(subsource.getName(), server));
+    Source vSource =
+        new Source("empty-virtual-source", User.userToUri(owner.getEmail(), server), true, true,
+            null, null, null, null, s);
+
+    assertTrue("Could not store virtual source", manager.storeSource(vSource));
+    assertTrue("Could not delete source", manager.deleteSource(subsource.getName()));
+
+    SourceSummary expectedSummary = new SourceSummary();
+    expectedSummary.setHref(Source.sourceToUri("empty-virtual-source", server));
+    expectedSummary.setTotalSensorDatas(0);
+
+    assertEquals("Source summary for empty virtual source is incorrect", expectedSummary,
+        manager.getSourceSummary("empty-virtual-source"));
   }
 
   /**
@@ -247,8 +283,8 @@ public class TestDbManagerSources extends DbManagerTestHelper {
     Source source1New = makeTestSource3();
     source1New.setName(source1.getName());
     assertFalse("Overwriting Source succeeded, but should fail", manager.storeSource(source1New));
-    assertTrue("Unable to overwrite Source, but should succeed", manager.storeSource(source1New,
-        true));
+    assertTrue("Unable to overwrite Source, but should succeed",
+        manager.storeSource(source1New, true));
     Source retrievedSource = manager.getSource(source1New.getName());
     // All fields of this updated source were the same as source3, so we tweak the name back to
     // source3's name so we can use the Source.equals() method to ensure all fields were updated
@@ -264,11 +300,14 @@ public class TestDbManagerSources extends DbManagerTestHelper {
 
   /**
    * Tests the deleteSource method.
+   * 
+   * @throws Exception
    */
   @Test
-  public void testDeleteSource() {
+  public void testDeleteSource() throws Exception {
     // Test cases: delete Source from empty database, delete stored Source, delete deleted Source,
-    // delete unknown Source name, delete empty Source name, delete null Source name.
+    // delete unknown Source name, delete empty Source name, delete null Source name, delete Source
+    // with sensor data.
 
     // Add Users that own test Sources.
     storeTestUsers();
@@ -300,6 +339,14 @@ public class TestDbManagerSources extends DbManagerTestHelper {
     assertTrue("After deleting all known Sources, Sources remain in DB", manager.getSourceIndex()
         .getSourceRef().isEmpty());
 
-    // TODO add case to check that sensor data for source is deleted when source is deleted
+    // case #8: delete source with sensor data
+    assertTrue(UNABLE_TO_STORE_SOURCE, manager.storeSource(source1));
+    SensorData s = this.makeTestSensorData1();
+    assertTrue("Unable to store sensor data", manager.storeSensorDataNoCache(s));
+    assertNotNull("Not able to retrieve sensor data",
+        manager.getSensorData(UriUtils.getUriSuffix(s.getSource()), s.getTimestamp()));
+    assertTrue("Unable to delete source1", manager.deleteSource(source1.getName()));
+    assertNull("Able to retrieve sensor data after deleting source",
+        manager.getSensorData(UriUtils.getUriSuffix(s.getSource()), s.getTimestamp()));
   }
 }

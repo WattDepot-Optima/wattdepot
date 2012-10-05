@@ -1,11 +1,12 @@
 package org.wattdepot.server;
 
 import static org.wattdepot.server.ServerProperties.CONTEXT_ROOT_KEY;
-import static org.wattdepot.server.ServerProperties.SERVER_HOME_DIR;
-import static org.wattdepot.server.ServerProperties.GVIZ_CONTEXT_ROOT_KEY;
-import static org.wattdepot.server.ServerProperties.GVIZ_PORT_KEY;
+import static org.wattdepot.server.ServerProperties.DATAINPUT_FILE_KEY;
+import static org.wattdepot.server.ServerProperties.DATAINPUT_START_KEY;
 import static org.wattdepot.server.ServerProperties.LOGGING_LEVEL_KEY;
+import static org.wattdepot.server.ServerProperties.MAX_THREADS;
 import static org.wattdepot.server.ServerProperties.PORT_KEY;
+import static org.wattdepot.server.ServerProperties.SERVER_HOME_DIR;
 import static org.wattdepot.server.ServerProperties.TEST_INSTALL_KEY;
 import java.io.File;
 import java.util.List;
@@ -20,17 +21,19 @@ import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.cli.PosixParser;
-import org.mortbay.jetty.servlet.Context;
-import org.mortbay.jetty.servlet.ServletHolder;
 import org.restlet.Application;
 import org.restlet.Component;
+import org.restlet.Request;
+import org.restlet.Response;
 import org.restlet.Restlet;
-import org.restlet.routing.Router;
 import org.restlet.data.Protocol;
+import org.restlet.routing.Router;
+import org.restlet.routing.Template;
+import org.wattdepot.resource.NoResource;
 import org.wattdepot.resource.carbon.CarbonResource;
 import org.wattdepot.resource.db.DatabaseResource;
 import org.wattdepot.resource.energy.EnergyResource;
-import org.wattdepot.resource.gviz.GVisualizationServlet;
+import org.wattdepot.resource.gviz.GVisualizationResource;
 import org.wattdepot.resource.health.HealthResource;
 import org.wattdepot.resource.power.PowerResource;
 import org.wattdepot.resource.sensordata.SensorDataResource;
@@ -41,6 +44,7 @@ import org.wattdepot.resource.source.jaxb.Source;
 import org.wattdepot.resource.source.summary.SourceSummaryResource;
 import org.wattdepot.resource.user.UserResource;
 import org.wattdepot.resource.user.jaxb.User;
+import org.wattdepot.sensor.MultiThreadedSensor;
 import org.wattdepot.server.db.DbManager;
 import org.wattdepot.util.logger.RestletLoggerUtil;
 import org.wattdepot.util.logger.WattDepotLogger;
@@ -52,19 +56,14 @@ import org.wattdepot.util.logger.WattDepotLogger;
  * @author Robert Brewer
  * @author Philip Johnson
  */
+@SuppressWarnings("PMD.TooManyStaticImports")
 public class Server extends Application {
 
   /** Holds the Restlet Component associated with this Server. */
   private Component component;
 
-  /** Holds the Jetty server associated with this Server. */
-  private org.mortbay.jetty.Server jettyServer;
-  
   /** Holds the hostname associated with this Server. */
   private String hostName;
-
-  /** Holds the hostname associated with the Google Visualization API service. */
-  private String gvizHostName;
 
   /** Holds the WattDepotLogger for the Server. */
   private Logger logger = null;
@@ -84,7 +83,7 @@ public class Server extends Application {
   /** The URI used for the users resource. */
   public static final String USERS_URI = "users";
 
-  /** The URI used for the users resource. */
+  /** The URI used for the google visualization resource. */
   public static final String GVIZ_URI = "gviz";
 
   /** URI fragment for source summary. */
@@ -105,11 +104,20 @@ public class Server extends Application {
   /** URI parameter for source name. */
   private static final String SOURCE_PARAM = "{source}";
 
+  /** URI parameter for timestamp. */
+  private static final String TIMESTAMP_PARAM = "{timestamp}";
+
   /** URI parameter for retrieving latest sensor data. */
   public static final String LATEST = "latest";
 
   /** URI parameter for deleting all sensor data. */
   public static final String ALL = "all";
+
+  /** The authenticator to use for all resources. */
+  public WattDepotAuthenticator guard;
+
+  /** The DbManager for this server. */
+  public DbManager dbManager;
 
   /** Users JAXBContext. */
   private static final JAXBContext userJAXB;
@@ -202,12 +210,33 @@ public class Server extends Application {
     Server server = new Server();
     server.serverProperties = serverProperties;
     server.logger =
-        WattDepotLogger.getLogger("org.wattdepot.server", server.serverProperties
-            .get(SERVER_HOME_DIR));
+        WattDepotLogger.getLogger("org.wattdepot.server",
+            server.serverProperties.get(SERVER_HOME_DIR));
     server.hostName = server.serverProperties.getFullHost();
     int port = Integer.valueOf(server.serverProperties.get(PORT_KEY));
     server.component = new Component();
-    server.component.getServers().add(Protocol.HTTP, port);
+    org.restlet.Server httpServer = new org.restlet.Server(Protocol.HTTP, port);
+    server.component.getServers().add(httpServer);
+    // Based on this mailing list thread, the following line will set the number of http listening
+    // threads (when using the default server connector??). The value is set in ServerProperties.
+    // Setting maxThreads too low can cause the server to spin with no threads available under
+    // heavy (or buggy) client load. See this thread for more info:
+    // http://restlet.tigris.org/ds/viewMessage.do?dsForumId=4447&viewType=browseAll&dsMessageId=2625612
+    httpServer.getContext().getParameters()
+        .add("maxThreads", server.serverProperties.get(MAX_THREADS).toString());
+    // More thread tweaks, based on this message from Restlet mailing list:
+    // http://restlet.tigris.org/ds/viewMessage.do?dsForumId=4447&dsMessageId=2976752
+//    httpServer.getContext().getParameters().add("minThreads", "10");
+//    httpServer.getContext().getParameters().add("lowThreads", "145");
+//    httpServer.getContext().getParameters().add("maxQueued", "20");
+
+    // Only thread parameter for Simple server connector, so bump it up too: 
+//    httpServer.getContext().getParameters().add("defaultThreads", "50");
+    
+    // Try turning off persistent connections to see if that helps thread exhaustion problems
+    // httpServer.getContext().getParameters()
+    // .add("persistingConnections", "false");
+
     server.component.getDefaultHost().attach("/" + server.serverProperties.get(CONTEXT_ROOT_KEY),
         server);
 
@@ -218,35 +247,38 @@ public class Server extends Application {
     server.logger.warning("Host: " + server.hostName);
     server.logger.info(server.serverProperties.echoProperties());
 
+    // Add the two known roles for users.
+    server.getRoles().add(WattDepotEnroler.ADMINISTRATOR);
+    server.getRoles().add(WattDepotEnroler.USER);
+
     Map<String, Object> attributes = server.getContext().getAttributes();
     // Put server and serverProperties in first, because dbManager() will look at serverProperties
     attributes.put("WattDepotServer", server);
     attributes.put("ServerProperties", server.serverProperties);
-    DbManager dbManager;
     // If we are in test mode
     if (server.serverProperties.get(TEST_INSTALL_KEY).equalsIgnoreCase("true")) {
       // Make sure database starts off wiped
-      dbManager = new DbManager(server, true);
+      server.dbManager = new DbManager(server, true);
     }
     else {
-      dbManager = new DbManager(server);
+      server.dbManager = new DbManager(server);
       try {
-        server.loadDefaultResources(dbManager, server.serverProperties.get(SERVER_HOME_DIR));
+        server.loadDefaultResources(server.dbManager, server.serverProperties.get(SERVER_HOME_DIR));
       }
       catch (Exception e) {
         server.logger.severe("Unable to load default resources: " + e.toString());
       }
     }
-    attributes.put("DbManager", dbManager);
+    attributes.put("DbManager", server.dbManager);
 
     if (compress) {
       server.logger.warning("Compressing database tables.");
-      dbManager.performMaintenance();
+      server.dbManager.performMaintenance();
       server.logger.warning("Compressing database tables complete.");
     }
     if (reindex) {
       server.logger.warning("Reindexing database tables.");
-      dbManager.indexTables();
+      server.dbManager.indexTables();
       server.logger.warning("Reindexing database tables complete.");
     }
     if (compress || reindex) {
@@ -254,33 +286,21 @@ public class Server extends Application {
       return null;
     }
     else {
-      // Only start server up for queries if when not compressing or reindexing
-
-      // Set up the Google Visualization API servlet
-      server.gvizHostName = server.serverProperties.getGvizFullHost();
-      int gvizPort = Integer.valueOf(server.serverProperties.get(GVIZ_PORT_KEY));
-      server.jettyServer = new org.mortbay.jetty.Server(gvizPort);
-      server.logger.warning("Google visualization URL: " + server.gvizHostName);
-      Context jettyContext =
-          new Context(server.jettyServer, "/" + server.serverProperties.get(GVIZ_CONTEXT_ROOT_KEY));
-
-      ServletHolder servletHolder = new ServletHolder(new GVisualizationServlet(server));
-      servletHolder.setInitParameter("applicationClassName",
-          "org.wattdepot.resource.gviz.GVisualizationServlet");
-      servletHolder.setInitOrder(1);
-      jettyContext.addServlet(servletHolder, "/sources/*");
-
+      // Only start server up for queries if not compressing or reindexing
       // Now let's open for business.
       server.logger.info("Maximum Java heap size (MB): "
           + (Runtime.getRuntime().maxMemory() / 1000000.0));
       server.component.start();
-     // server.jettyServer.start();
       server.logger.warning("WattDepot server (Version " + getVersion() + ") now running.");
-      
+
+      if ("true".equals(server.serverProperties.get(DATAINPUT_START_KEY))
+          && !"true".equals(server.serverProperties.get(TEST_INSTALL_KEY))) {
+        // Note, always setting debug to false when running sensor in server for now
+        MultiThreadedSensor.start(server.serverProperties.get(DATAINPUT_FILE_KEY), false, null);
+      }
       return server;
     }
   }
-  
 
   /**
    * Loads the default resources from canonical directory into database. Intended to be called after
@@ -352,7 +372,7 @@ public class Server extends Application {
             // SensorData read from the file might have an Owner field that points to a different
             // host URI. We want all defaults normalized to this server, so update it.
             data.setSource(Source.updateUri(data.getSource(), this));
-            if (dbManager.storeSensorData(data)) {
+            if (dbManager.storeSensorDataNoCache(data)) {
               // Too voluminous to print every sensor data loaded
               // logger.info("Loaded sensor data for source " + data.getSource() + ", time "
               // + data.getTimestamp() + " from defaults.");
@@ -369,7 +389,7 @@ public class Server extends Application {
               // SensorData read from the file might have an Owner field that points to a different
               // host URI. We want all defaults normalized to this server, so update it.
               theData.setSource(Source.updateUri(theData.getSource(), this));
-              if (dbManager.storeSensorData(theData)) {
+              if (dbManager.storeSensorDataNoCache(theData)) {
                 // Too voluminous to print every sensor data loaded
                 // logger.info("Loaded sensor data for source " + data.getSource() + ", time "
                 // + data.getTimestamp() + " from defaults.");
@@ -458,69 +478,71 @@ public class Server extends Application {
   @Override
   public synchronized Restlet createInboundRoot() {
     Router router = new Router(getContext());
-    router.setDefaultMatchingQuery(true);
-    
+    router.setDefaultMatchingQuery(false);
+
     // This Router is used to control access to the User resource
     // Router userRouter = new Router(getContext());
     router.attach("/" + USERS_URI, UserResource.class);
     router.attach("/" + USERS_URI + "/{user}", UserResource.class);
-    // Guard userGuard = new AdminAuthenticator(getContext());
-    // userGuard.setNext(userRouter);
 
-    // Health resource is public, so no Guard
     router.attach("/" + HEALTH_URI, HealthResource.class);
 
-    // Source does its own authentication processing, so don't use Guard
     router.attach("/" + SOURCES_URI, SourceResource.class);
-    router.attach("/" + SOURCES_URI + "/?fetchAll={fetchAll}", SourceResource.class);
+    router.attach("/" + SOURCES_URI + "/", SourceResource.class);
     router.attach("/" + SOURCES_URI + "/" + SOURCE_PARAM, SourceResource.class);
-    router.attach("/" + SOURCES_URI + "/" + SOURCE_PARAM + "?overwrite={overwrite}",
-        SourceResource.class);
     router.attach("/" + SOURCES_URI + "/" + SOURCE_PARAM + "/" + SUMMARY_URI,
         SourceSummaryResource.class);
 
-    // SensorData does its own authentication processing, so don't use Guard
     router.attach("/" + SOURCES_URI + "/" + SOURCE_PARAM + "/" + SENSORDATA_URI,
         SensorDataResource.class);
-    // Specifying all the combinations of optional parameters is bogus, but don't want to deal
-    // with parsing the query string right now.
-    router.attach("/" + SOURCES_URI + "/" + SOURCE_PARAM + "/" + SENSORDATA_URI
-        + "/?startTime={startTime}&endTime={endTime}&fetchAll={fetchAll}", SensorDataResource.class);
-    router.attach("/" + SOURCES_URI + "/" + SOURCE_PARAM + "/" + SENSORDATA_URI
-        + "/?startTime={startTime}&endTime={endTime}", SensorDataResource.class);
-    router.attach("/" + SOURCES_URI + "/" + SOURCE_PARAM + "/" + SENSORDATA_URI + "/{timestamp}",
+    router.attach("/" + SOURCES_URI + "/" + SOURCE_PARAM + "/" + SENSORDATA_URI + "/",
         SensorDataResource.class);
+    router.attach("/" + SOURCES_URI + "/" + SOURCE_PARAM + "/" + SENSORDATA_URI + "/"
+        + TIMESTAMP_PARAM, SensorDataResource.class);
 
-    // Power does its own authentication processing, so don't use Guard
-    router.attach("/" + SOURCES_URI + "/" + SOURCE_PARAM + "/" + POWER_URI + "/{timestamp}",
+    router.attach("/" + SOURCES_URI + "/" + SOURCE_PARAM + "/" + POWER_URI + "/" + TIMESTAMP_PARAM,
         PowerResource.class);
 
-    // Energy does its own authentication processing, so don't use Guard
-    router.attach("/" + SOURCES_URI + "/" + SOURCE_PARAM + "/" + ENERGY_URI
-        + "/?startTime={startTime}&endTime={endTime}&samplingInterval={samplingInterval}",
+    router.attach("/" + SOURCES_URI + "/" + SOURCE_PARAM + "/" + ENERGY_URI + "/",
         EnergyResource.class);
-    router.attach("/" + SOURCES_URI + "/" + SOURCE_PARAM + "/" + ENERGY_URI
-        + "/?startTime={startTime}&endTime={endTime}", EnergyResource.class);
 
-    // Carbon does its own authentication processing, so don't use Guard
-    router.attach("/" + SOURCES_URI + "/" + SOURCE_PARAM + "/" + CARBON_URI
-        + "/?startTime={startTime}&endTime={endTime}&samplingInterval={samplingInterval}",
+    router.attach("/" + SOURCES_URI + "/" + SOURCE_PARAM + "/" + CARBON_URI + "/",
         CarbonResource.class);
-    router.attach("/" + SOURCES_URI + "/" + SOURCE_PARAM + "/" + CARBON_URI
-        + "/?startTime={startTime}&endTime={endTime}", CarbonResource.class);
 
-    // Database does its own authentication processing, so don't use Guard
+    router.attach("/" + SOURCES_URI + "/" + SOURCE_PARAM + "/" + GVIZ_URI + "/{type}",
+        GVisualizationResource.class);
+    router.attach("/" + SOURCES_URI + "/" + SOURCE_PARAM + "/" + GVIZ_URI + "/{type}/"
+        + TIMESTAMP_PARAM, GVisualizationResource.class);
+
     router.attach("/" + DATABASE_URI + "/" + "{method}", DatabaseResource.class);
 
-    // // Google Visualization API resource
-    // Route route = router.attach("/" + SOURCES_URI + "/{source}" + "/" + GVIZ_URI,
-    // GVisualizationResource.class);
-    // route.getTemplate().setMatchingMode(Template.MODE_EQUALS);
-    // router.attach("/" + SOURCES_URI + "/{source}" + "/" + GVIZ_URI + "?{parameters}",
-    // GVisualizationResource.class);
-    // router.attachDefault(userGuard);
+    router.attachDefault(NoResource.class);
+    router.attach("/", NoResource.class, Template.MODE_STARTS_WITH);
 
-    return router;
+    // Authenticate
+    guard = new WattDepotAuthenticator(getContext());
+    guard.setNext(router);
+
+    // return the authenticator as the entry point to WattDepot
+    return guard;
+
+  }
+
+  /**
+   * Authenticate user and return true or false. This manual call to challenge is needed because the
+   * Authenticator is optional.
+   * http://stackoverflow.com/questions/2217418/fine-grained-authentication-with-restlet
+   * 
+   * @param request The request to be authenticated.
+   * @param response The response to be authenticated.
+   * @return True if the request has already been authenticated, False if a challenge is needed.
+   */
+  public boolean authenticate(Request request, Response response) {
+    if (!request.getClientInfo().isAuthenticated()) {
+      guard.challenge(response, false);
+      return false;
+    }
+    return true;
   }
 
   /**
@@ -553,14 +575,13 @@ public class Server extends Application {
   }
 
   /**
-   * Shuts down the WattDepot server, in the hope that it will stop listening for connections. This
-   * might not actually work, currently untested.
+   * Shuts down the WattDepot server, in the hope that it will stop listening for connections.
    * 
    * @throws Exception if something goes wrong during the shutdown.
    */
   public void shutdown() throws Exception {
     this.component.stop();
-   // this.jettyServer.stop();
+    this.dbManager.stop();
   }
 
   /**

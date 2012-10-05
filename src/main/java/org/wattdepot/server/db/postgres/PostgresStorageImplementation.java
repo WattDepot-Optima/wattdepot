@@ -1,7 +1,19 @@
 package org.wattdepot.server.db.postgres;
 
-import java.io.StringReader;
-import java.io.StringWriter;
+import static org.wattdepot.server.ServerProperties.DATABASE_URL_KEY;
+import static org.wattdepot.server.ServerProperties.DB_DATABASE_NAME_KEY;
+import static org.wattdepot.server.ServerProperties.DB_HOSTNAME_KEY;
+import static org.wattdepot.server.ServerProperties.DB_PASSWORD_KEY;
+import static org.wattdepot.server.ServerProperties.DB_PORT_KEY;
+import static org.wattdepot.server.ServerProperties.DB_USERNAME_KEY;
+import static org.wattdepot.server.ServerProperties.POSTGRES_SCHEMA_KEY;
+import static org.wattdepot.server.ServerProperties.POSTGRES_MAX_ACTIVE_KEY;
+import static org.wattdepot.server.ServerProperties.POSTGRES_INITIAL_SIZE_KEY;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.sql.CallableStatement;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -11,17 +23,17 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
-import javax.xml.bind.JAXBContext;
-import javax.xml.bind.JAXBException;
-import javax.xml.bind.Marshaller;
-import javax.xml.bind.Unmarshaller;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 import javax.xml.datatype.DatatypeConstants;
 import javax.xml.datatype.XMLGregorianCalendar;
-import org.wattdepot.resource.property.jaxb.Properties;
+import org.apache.tomcat.jdbc.pool.DataSource;
+import org.apache.tomcat.jdbc.pool.PoolProperties;
+import org.wattdepot.resource.property.jaxb.Property;
 import org.wattdepot.resource.sensordata.SensorDataStraddle;
-import org.wattdepot.resource.sensordata.StraddleList;
 import org.wattdepot.resource.sensordata.jaxb.SensorData;
 import org.wattdepot.resource.sensordata.jaxb.SensorDataIndex;
 import org.wattdepot.resource.sensordata.jaxb.SensorDataRef;
@@ -39,26 +51,18 @@ import org.wattdepot.server.Server;
 import org.wattdepot.server.ServerProperties;
 import org.wattdepot.server.db.DbBadIntervalException;
 import org.wattdepot.server.db.DbImplementation;
+import org.wattdepot.server.db.DbManager;
 import org.wattdepot.util.StackTrace;
+import org.wattdepot.util.UriUtils;
 import org.wattdepot.util.tstamp.Tstamp;
 
 /**
- * Provides a implementation of DbImplementation using PostgreSQL in embedded mode.
+ * Provides a implementation of DbImplementation using PostgreSQL.
  * 
  * @author Andrea Connell
- * @author Robert Brewer
- * @author Philip Johnson
  */
+@SuppressWarnings("PMD.TooManyStaticImports")
 public class PostgresStorageImplementation extends DbImplementation {
-
-  /** Port number to connect to PostgreSQL on (ignored for Heroku). */
-  private static final String port = "5432";
-  /** Name of database to use (ignored for Heroku). */
-  private static final String dbName = "wattdepot";
-  /** Username for database (ignored for Heroku). */
-  private static final String userName = "postgres";
-  /** Password for database (ignored for Heroku). */
-  private static final String password = "userpass";
 
   /** The logger message when executing a query. */
   private static final String executeQueryMsg = "PostgreSQL: Executing query ";
@@ -66,92 +70,371 @@ public class PostgresStorageImplementation extends DbImplementation {
   private static final String errorClosingMsg = "PostgreSQL: Error while closing. \n";
   /** The logger message for database errors. */
   private static final String postgresError = "PostgreSQL: Error ";
-  /** The logger message for unable to parse XML */
-  private static final String UNABLE_TO_PARSE_PROPERTY_XML =
-      "Unable to parse property XML from database ";
 
   /** The JDBC driver. */
   private static final String driver = "org.postgresql.Driver";
-
-  /** The PostgreSQL connection URL */
-  private final String connectionUrl;
+  /** The PostgreSQL connection URL. */
+  private String connectionUrl;
   /** Indicates whether this database was initialized or was pre-existing. */
   private boolean isFreshlyCreated = false;
 
-  /** Property JAXBContext. */
-  private static final JAXBContext propertiesJAXB;
-  /** SubSources JAXBContext. */
-  private static final JAXBContext subSourcesJAXB;
+  /**
+   * The connection pool, which manages database connections so we don't have to open and close them
+   * each time. This avoids any overhead of repeatedly opening and closing connections, and allows a
+   * large number of clients to share a small number of database connections.
+   */
+  private DataSource connectionPool;
 
-  // JAXBContexts are thread safe, so we can share them across all instances and threads.
-  // https://jaxb.dev.java.net/guide/Performance_and_thread_safety.html
-  static {
-    try {
-      propertiesJAXB =
-          JAXBContext.newInstance(org.wattdepot.resource.property.jaxb.Properties.class);
-      subSourcesJAXB =
-          JAXBContext.newInstance(org.wattdepot.resource.source.jaxb.SubSources.class);
+  /** The SQL state indicating that INSERT tried to add data to a table with a preexisting key. */
+  private static final String DUPLICATE_KEY = "23505";
+  /** The SQL state indication that INSERT tried to violate a foreign key constraint. */
+  private static final String FOREIGN_KEY_VIOLATION = "23503";
+  /** The SQL state indication that a connection was made to an invalid catalog name. */
+  private static final String INVALID_CATALOG_NAME = "3D000";
+
+  /**
+   * Instantiates the PostgreSQL implementation. Throws a Runtime exception if the PostgeSQL jar
+   * file cannot be found on the classpath.
+   * 
+   * @param server The server this DbImplementation is associated with.
+   * @param dbManager The dbManager this DbImplementation is associated with.
+   */
+  public PostgresStorageImplementation(Server server, DbManager dbManager) {
+    super(server, dbManager);
+
+    ServerProperties props = server.getServerProperties();
+    String propDbName = props.get(DB_DATABASE_NAME_KEY), propHostname = props.get(DB_HOSTNAME_KEY), propPort =
+        props.get(DB_PORT_KEY), propUser = props.get(DB_USERNAME_KEY), propPassword =
+        props.get(DB_PASSWORD_KEY), jdbcPrefix = "jdbc:postgresql://";
+
+    // Connection URL lacking database name, which will cause Postgres to default to a database
+    // named after the username
+    String baseConnectionUrl =
+        jdbcPrefix + propHostname + ":" + propPort + "?user=" + propUser + "&password="
+            + propPassword;
+
+    if (props.get(DATABASE_URL_KEY) == null || props.get(DATABASE_URL_KEY).length() == 0) {
+      if (isIdentifierSafe(propDbName)) {
+        this.connectionUrl =
+            jdbcPrefix + propHostname + ":" + propPort + "/" + propDbName + "?user=" + propUser
+                + "&password=" + propPassword;
+      }
+      else {
+        String msg =
+            "Postgres: Database catalog name \"" + propDbName
+                + "\" is not a valid identifier [a-zA-Z_0-9]. Aborting.";
+        this.logger.severe(msg);
+        throw new RuntimeException(msg);
+      }
     }
-    catch (Exception e) {
-      throw new RuntimeException("Couldn't create JAXB context instance.", e);
+
+    // make sure URL is JDBC compliant (default from Heroku isn't)
+    else if (!props.get(DATABASE_URL_KEY).contains("postgresql:")) {
+      this.connectionUrl = props.get(DATABASE_URL_KEY);
+      // assume connectionUrl is in the form postgres://username:password@host/dbName
+      String userInfo =
+          connectionUrl.substring(connectionUrl.indexOf("//") + 2, connectionUrl.indexOf("@"));
+      String user = userInfo.split(":")[0];
+      String password = userInfo.split(":")[1];
+      String hostName =
+          connectionUrl.substring(connectionUrl.indexOf("@") + 1, connectionUrl.lastIndexOf("/"));
+      String dbName = connectionUrl.substring(connectionUrl.lastIndexOf("/") + 1);
+      if (dbName.contains("?")) {
+        dbName = dbName.substring(0, dbName.indexOf("?"));
+      }
+
+      String params = "";
+      if (connectionUrl.contains("?")) {
+        params = "&" + connectionUrl.substring(connectionUrl.indexOf("?") + 1);
+      }
+      this.connectionUrl =
+          "jdbc:postgresql://" + hostName + "/" + dbName + "?user=" + user + "&password="
+              + password + params;
+      // baseConnectionUrl needs string without database name
+      baseConnectionUrl =
+          "jdbc:postgresql://" + hostName + "?user=" + user + "&password=" + password + params;
+    }
+    else {
+      // assume we have a valid jdbc connectionUrl in the form
+      // postgresql://hostName/dbName?user=user&password=password
+      this.connectionUrl = "jdbc:" + props.get(DATABASE_URL_KEY);
+      // baseConnectionUrl needs string without database name
+      baseConnectionUrl =
+          this.connectionUrl.substring(0, this.connectionUrl.lastIndexOf("/") - 1)
+              + this.connectionUrl.substring(this.connectionUrl.lastIndexOf("?") + 1,
+                  this.connectionUrl.length());
+    }
+
+    // Test if database catalog exists
+    Connection conn = null;
+    String schemaName = props.get(POSTGRES_SCHEMA_KEY);
+    PoolProperties poolProps = new PoolProperties();
+
+    try {
+      // First try connection to configured database name
+      conn = DriverManager.getConnection(this.connectionUrl);
+    }
+    catch (SQLException e) {
+      String theError = e.getSQLState();
+      if (INVALID_CATALOG_NAME.equals(theError)) {
+        // the specified database catalog doesn't exist
+        this.logger.warning("Postgres: configured database catalog " + propDbName
+            + " does not exist, attempting to create.");
+        // so try connecting without database name, which will default to a database equal to
+        // the username.
+        try {
+          conn = DriverManager.getConnection(baseConnectionUrl);
+          createDatabaseCatalog(conn, propDbName);
+        }
+        catch (SQLException exception) {
+          String error = exception.getSQLState();
+          String msg;
+          if (INVALID_CATALOG_NAME.equals(error)) {
+            // Can't connect to any database catalog, so give up.
+            msg =
+                "Postgres: unable to connect to default database catalog also. "
+                    + "Please create database catalog \"" + propDbName
+                    + "\" and try again. Aborting.";
+          }
+          else {
+            // Must be a problem creating the database catalog
+            msg =
+                "Postgres: unable to create database catalog. "
+                    + "Please create database catalog \"" + propDbName
+                    + "\" and try again. Aborting.";
+          }
+          this.logger.severe(msg);
+          throw new RuntimeException(msg, exception);
+        }
+      }
+      else {
+        String msg = "Postgres: failed to open connection to configured datbase catalog. Aborting.";
+        this.logger.severe(msg + StackTrace.toString(e));
+        throw new RuntimeException(msg, e);
+      }
+    }
+    finally {
+      try {
+        if (conn != null) {
+          conn.close();
+        }
+      }
+      catch (SQLException e) {
+        this.logger.warning(errorClosingMsg + StackTrace.toString(e));
+      }
+    }
+
+    // Check if configured to use schemas and set that up if needed
+    if ((schemaName != null) && (schemaName.length() != 0)) {
+      if (isIdentifierSafe(schemaName)) {
+        try {
+          // Note we cannot use connection from connection pool, because we need to query the
+          // database to find out what parameters to use in creating the pool.
+          conn = DriverManager.getConnection(this.connectionUrl);
+          configureSchema(conn, schemaName);
+          // Now make every pooled connection set search path to the configured schema
+          poolProps.setInitSQL("SET search_path TO " + schemaName + ";");
+        }
+        catch (SQLException e) {
+          String msg = "Failure attempting to create schema " + schemaName + ". ";
+          this.logger.warning(msg + StackTrace.toString(e));
+          throw new RuntimeException(msg, e);
+        }
+        finally {
+          try {
+            if (conn != null) {
+              conn.close();
+            }
+          }
+          catch (SQLException e) {
+            this.logger.warning(errorClosingMsg + StackTrace.toString(e));
+          }
+        }
+      }
+      else {
+        String msg =
+            "Postgres: Schema name \"" + schemaName
+                + "\" is not a valid identifier [a-zA-Z_0-9]. Aborting.";
+        this.logger.severe(msg);
+        throw new RuntimeException(msg);
+      }
+    }
+
+    // Set appropriate pool parameters
+    poolProps.setUrl(this.connectionUrl);
+    poolProps.setDriverClassName(driver);
+    poolProps.setTestWhileIdle(false);
+    // poolProps.setTestOnBorrow(true);
+    // poolProps.setValidationQuery("SELECT 1");
+    poolProps.setTestOnReturn(false);
+    // poolProps.setValidationInterval(30000);
+    // poolProps.setTimeBetweenEvictionRunsMillis(30000);
+    poolProps.setMaxActive(Integer.parseInt(props.get(POSTGRES_MAX_ACTIVE_KEY)));
+    poolProps.setInitialSize(Integer.parseInt(props.get(POSTGRES_INITIAL_SIZE_KEY)));
+    poolProps.setMaxWait(10000);
+    poolProps.setRemoveAbandoned(true);
+    poolProps.setLogAbandoned(true);
+    poolProps.setRemoveAbandonedTimeout(15);
+    // poolProps.setMinEvictableIdleTimeMillis(30000);
+    // poolProps.setMinIdle(10);
+    try {
+      this.connectionPool = new DataSource(poolProps);
+      conn = this.connectionPool.getConnection();
+    }
+    catch (SQLException e) {
+      String msg = "Postgres: failed to open connection. ";
+      this.logger.severe(msg + StackTrace.toString(e));
+      throw new RuntimeException(msg, e);
+    }
+    finally {
+      try {
+        if (conn != null) {
+          conn.close();
+        }
+      }
+      catch (SQLException e) {
+        this.logger.warning("Postgres: failed to close connection. " + StackTrace.toString(e));
+      }
+    }
+
+  }
+
+  /**
+   * Indicates whether a given string is safe as an SQL identifier (database, schema, or table
+   * names). Currently using regex "[a-zA-Z_0-9]+", i.e. alphanumeric plus "_". This might be a
+   * subset of all valid identifiers, but better safe than sorry.
+   * 
+   * @param id The possibly valid SQL identifier.
+   * @return true if the identifier is safe, and false if it is not.
+   */
+  public boolean isIdentifierSafe(String id) {
+    return id.matches("\\w+");
+  }
+
+  /**
+   * Creates the given database catalog.
+   * 
+   * @param conn The connection to use to connect to the database. Closing the connection is the
+   * responsibility of the caller.
+   * @param databaseName The name of the database. This string should be checked by
+   * isIdentifierSafe() before passing in.
+   * @throws SQLException if there is a problem creating the database.
+   * @see #isIdentifierSafe
+   */
+  private void createDatabaseCatalog(Connection conn, String databaseName) throws SQLException {
+    // Using Statement rather than PreparedStatement because database catalog names are not
+    // SQL Data statements. See
+    // http://www.applettalk.com/limitations-of-preparedstatement-with-postgresql-vt96926.html
+
+    Statement s = null;
+
+    this.logger.info("Creating database catalog " + databaseName);
+
+    String createDb = "CREATE DATABASE " + databaseName;
+
+    try {
+      s = conn.createStatement();
+      s.executeUpdate(createDb);
+    }
+    finally {
+      try {
+        if (s != null) {
+          s.close();
+        }
+      }
+      catch (SQLException e) {
+        this.logger.warning(errorClosingMsg + StackTrace.toString(e));
+      }
     }
   }
 
   /**
-   * The SQL state indicating that INSERT tried to add data to a table with a preexisting key.
-   */
-  private static final String DUPLICATE_KEY = "23505";
-
-  /**
-   * Instantiates the Derby implementation. Throws a Runtime exception if the Derby jar file cannot
-   * be found on the classpath.
+   * Checks if the given schema exists, and if not, creates it.
    * 
-   * @param server The server this DbImplementation is associated with.
+   * @param conn The connection to use to connect to the database. Closing the connection is the
+   * responsibility of the caller.
+   * @param schemaName Name of the schema to create.
+   * @throws SQLException if there is a problem creating the schema.
+   * 
    */
-  public PostgresStorageImplementation(Server server) {
-    super(server);
-
-    if (server.getServerProperties().HEROKU) {
-      connectionUrl = "jdbc:" + System.getenv("DATABASE_URL");
-    }
-    else {
-      connectionUrl =
-          "jdbc:postgresql://"
-              + server.getServerProperties().get(server.getServerProperties().HOSTNAME_KEY) + ":"
-              + port + "/" + dbName + "?user=" + userName + "&password=" + password;
-    }
-
-    // Try to load the derby driver.
-    try {
-      Class.forName(driver);
-    }
-    catch (java.lang.ClassNotFoundException e) {
-      String msg =
-          "Postgres: Exception during DbManager initialization: " + "Postgres not on CLASSPATH.";
-      this.logger.warning(msg + "\n" + StackTrace.toString(e));
-      throw new RuntimeException(msg, e);
-    }
+  private void configureSchema(Connection conn, String schemaName) throws SQLException {
+    PreparedStatement s = null;
+    Statement execStatement = null;
+    ResultSet rs = null;
+    String schemaExistsP =
+        "SELECT schema_name FROM information_schema.schemata WHERE schema_name =?";
 
     try {
-      DriverManager.getConnection(this.connectionUrl);
+      s = conn.prepareStatement(schemaExistsP);
+      s.setString(1, schemaName);
+      rs = s.executeQuery();
+      if (!rs.next()) {
+        // Schema does not exist, so we must create it
+        this.logger.info("Creating schema " + schemaName);
+
+        execStatement = conn.createStatement();
+        String createSchema = "CREATE SCHEMA " + schemaName;
+        execStatement.executeUpdate(createSchema);
+      }
     }
-    catch (SQLException e) {
-      this.logger.warning("Postgres: failed to open connection." + StackTrace.toString(e));
+    finally {
+      try {
+        if (rs != null) {
+          rs.close();
+        }
+        if (s != null) {
+          s.close();
+        }
+        if (execStatement != null) {
+          execStatement.close();
+        }
+      }
+      catch (SQLException e) {
+        this.logger.warning(errorClosingMsg + StackTrace.toString(e));
+      }
     }
   }
 
   /** {@inheritDoc} */
   @Override
   public void initialize(boolean wipe) {
+    Runtime.getRuntime().addShutdownHook(new Thread() {
+      /** Run the shutdown hook for shutting down Postgres connection pool. */
+      @Override
+      public void run() {
+        try {
+          connectionPool.close();
+        }
+        catch (Exception e) {
+          System.out.println("Postgres shutdown hook results: " + e.getMessage());
+        }
+      }
+    });
     String errorPrefix = "Error during initialization: ";
+
     try {
-      this.isFreshlyCreated = !isPreExisting();
-      String dbStatusMsg =
-          (this.isFreshlyCreated) ? "Postgres: uninitialized."
-              : "Postgres: previously initialized.";
-      this.logger.info(dbStatusMsg);
+      try {
+        this.isFreshlyCreated = !isPreExisting();
+        String dbStatusMsg =
+            (this.isFreshlyCreated) ? "Postgres: uninitialized."
+                : "Postgres: previously initialized.";
+        this.logger.info(dbStatusMsg);
+      }
+      catch (SQLException e) {
+        if (wipe) {
+          // An exception in isPreExisting most likely means the table schemas are incorrect.
+          // If the user wants to wipe all data AND the current tables have the wrong schema, just
+          // delete all tables and start from scratch.
+          this.logger.warning("Recreating Postgres schema");
+          dropTables();
+          this.isFreshlyCreated = true;
+        }
+        else {
+          throw e;
+        }
+      }
       if (this.isFreshlyCreated) {
-        this.logger.warning("Postgres schema doesn't exist.  Creating...");
+        this.logger.warning("Postgres tables don't exist. Creating...");
         createTables();
       }
       // Only need to wipe tables if database has already been created and wiping was requested
@@ -160,7 +443,9 @@ public class PostgresStorageImplementation extends DbImplementation {
       }
     }
     catch (SQLException e) {
-      this.logger.warning(errorPrefix + StackTrace.toString(e));
+      String msg = errorPrefix + StackTrace.toString(e);
+      this.logger.warning(msg);
+      throw new RuntimeException(msg, e);
     }
   }
 
@@ -175,26 +460,38 @@ public class PostgresStorageImplementation extends DbImplementation {
   private boolean isPreExisting() throws SQLException {
     Connection conn = null;
     Statement s = null;
+    boolean ret = true;
     try {
-      conn = DriverManager.getConnection(connectionUrl);
+      conn = connectionPool.getConnection();
+
+      List<String> testStatements =
+          Arrays.asList(testUserTableStatement, testUserPropertyTableStatement,
+              testSourceTableStatement, testSourceHierarchyTableStatement,
+              testSourcePropertyTableStatement, testSensorDataTableStatement,
+              testSensorDataPropertyTableStatement);
+
       s = conn.createStatement();
-      s.execute(testUserTableStatement);
-      s.execute(testSourceTableStatement);
-      s.execute(testSensorDataTableStatement);
-    }
-    catch (SQLException e) {
-      String theError = (e).getSQLState();
-      if ("42P01".equals(theError)) {
-        // Database doesn't exist.
-        return false;
-      }
-      else if ("42X14".equals(theError) || "42821".equals(theError)) {
-        // Incorrect table definition.
-        throw e;
-      }
-      else {
-        // Unknown SQLException
-        throw e;
+      for (String test : testStatements) {
+        try {
+          s.execute(test);
+        }
+        catch (SQLException e) {
+          String theError = (e).getSQLState();
+
+          if ("42P01".equals(theError)) {
+            // Table doesn't exist. Remember this and continue to check the rest of the tables.
+            // We do this so that if an error occurs in another table, it still gets thrown.
+            ret = false;
+          }
+          else if ("42703".equals(theError) || "42P10".equals(theError)) {
+            // Incorrect table definition.
+            throw e;
+          }
+          else {
+            // Unknown SQLException
+            throw e;
+          }
+        }
       }
     }
     finally {
@@ -206,7 +503,7 @@ public class PostgresStorageImplementation extends DbImplementation {
       }
     }
     // If table exists will get - WARNING 02000: No row was found
-    return true;
+    return ret;
   }
 
   /**
@@ -218,13 +515,68 @@ public class PostgresStorageImplementation extends DbImplementation {
     Connection conn = null;
     Statement s = null;
     try {
-      conn = DriverManager.getConnection(connectionUrl);
+      conn = connectionPool.getConnection();
+
+      List<String> createStatements =
+          Arrays.asList(createUserTableStatement, createUserPropertyTableStatement,
+              createSourceTableStatement, createSourceHierarchyTableStatement,
+              createSourcePropertyTableStatement, createSensorDataTableStatement,
+              createSensorDataPropertyTableStatement, indexSensorDataSourceTstampDescStatement);
+
       s = conn.createStatement();
-      s.execute(createSensorDataTableStatement);
-      s.execute(createUserTableStatement);
-      s.execute(createSourceTableStatement);
-      s.execute(indexSensorDataSourceTstampDescStatement);
+      for (String create : createStatements) {
+        try {
+          s.execute(create);
+        }
+        catch (SQLException e) {
+          // If the error is that the table already exists, ignore it and move on.
+          if (!"42P07".equals(e.getSQLState())) {
+            this.logger.warning(e.getSQLState() + ": " + e.getMessage());
+          }
+        }
+      }
+    }
+    finally {
+      if (s != null) {
+        s.close();
+      }
+      if (conn != null) {
+        conn.close();
+      }
+    }
+  }
+
+  /**
+   * Drop all database tables.
+   * 
+   * @throws SQLException If an error occurs with the database connection.
+   * 
+   */
+  private void dropTables() throws SQLException {
+    Connection conn = null;
+    Statement s = null;
+    try {
+      conn = connectionPool.getConnection();
+      List<String> dropStatements =
+          Arrays.asList(dropSensorDataSourceTstampDescStatement,
+              dropSensorDataPropertyTableStatement, dropSensorDataTableStatement,
+              dropSourcePropertyTableStatement, dropSourceHierarchyTableStatement,
+              dropSourceTableStatement, dropUserPropertyTableStatement, dropUserTableStatement);
+
+      s = conn.createStatement();
+      for (String drop : dropStatements) {
+        try {
+          s.execute(drop);
+        }
+        catch (SQLException e) {
+          // If the error is that the table or index doesn't exist, ignore it and move on.
+          if (!"42704".equals(e.getSQLState()) && !"42P01".equals(e.getSQLState())) {
+            this.logger.warning(e.getSQLState() + ": " + e.getMessage());
+          }
+        }
+      }
       s.close();
+
     }
     finally {
       if (s != null) {
@@ -245,11 +597,15 @@ public class PostgresStorageImplementation extends DbImplementation {
     Connection conn = null;
     Statement s = null;
     try {
-      conn = DriverManager.getConnection(connectionUrl);
+      conn = connectionPool.getConnection();
       s = conn.createStatement();
-      s.execute("DELETE from WattDepotUser");
-      s.execute("DELETE from Source");
+      s.execute("DELETE from SensorDataProperty");
       s.execute("DELETE from SensorData");
+      s.execute("DELETE from SourceProperty");
+      s.execute("DELETE from SourceHierarchy");
+      s.execute("DELETE from Source");
+      s.execute("DELETE from WattDepotUserProperty");
+      s.execute("DELETE from WattDepotUser");
       s.close();
     }
     finally {
@@ -271,25 +627,58 @@ public class PostgresStorageImplementation extends DbImplementation {
 
   /** The SQL string for creating the Source table. */
   private static final String createSourceTableStatement = "create table Source  " + "("
-      + " Name VARCHAR(128) NOT NULL, " + " Owner VARCHAR(256) NOT NULL, "
-      + " PublicP SMALLINT NOT NULL, " + " Virtual SMALLINT NOT NULL, "
+      + " Name VARCHAR(128) NOT NULL, " + " Owner VARCHAR(128) NOT NULL, "
+      + " PublicP BOOLEAN NOT NULL, " + " Virtual BOOLEAN NOT NULL, "
       + " Coordinates VARCHAR(80), " + " Location VARCHAR(256), " + " Description VARCHAR(1024), "
-      + " SubSources VARCHAR(32000), " + " Properties VARCHAR(32000), "
-      + " LastMod TIMESTAMP NOT NULL, " + " PRIMARY KEY (Name) " + ")";
+      + " CarbonIntensity DOUBLE PRECISION, " + " FuelType VARCHAR(50), "
+      + " UpdateInterval INTEGER, " + " EnergyDirection VARCHAR(50), "
+      + " SupportsEnergyCounters BOOLEAN, " + " CacheWindowLength INTEGER, "
+      + " CacheCheckpointInterval INTEGER, " + " LastMod TIMESTAMP NOT NULL, "
+      + " PRIMARY KEY (Name), " + " FOREIGN KEY (Owner) REFERENCES WattDepotUser(Username)" + ")";
 
   /** An SQL string to test whether the Source table exists and has the correct schema. */
-  private static final String testSourceTableStatement =
-      " UPDATE Source SET "
-          + " Name = 'db-test-source', "
-          + " Owner = 'http://server.wattdepot.org/wattdepot/users/db-test-user', "
-          + " PublicP = 0, "
-          + " Virtual = 1, "
-          + " Coordinates = '21.30078,-157.819129,41', "
-          + " Location = 'Some place', "
-          + " Description = 'A test source.', "
-          + " SubSources = '<SubSources><Href>http://server.wattdepot.org:1234/wattdepot/sources/SIM_HONOLULU_8</Href><Href>http://server.wattdepot.org:1234/wattdepot/sources/SIM_HONOLULU_9</Href></SubSources>', "
-          + " Properties = '<Properties><Property><Key>carbonIntensity</Key><Value>2120</Value></Property></Properties>', "
-          + " LastMod = '" + new Timestamp(new Date().getTime()).toString() + "' " + " WHERE 1=3";
+  private static final String testSourceTableStatement = " UPDATE Source SET "
+      + " Name = 'db-test-source', "
+      + " Owner = 'http://server.wattdepot.org/wattdepot/users/db-test-user', "
+      + " PublicP = FALSE, " + " Virtual = TRUE, " + " Coordinates = '21.30078,-157.819129,41', "
+      + " Location = 'Some place', " + " Description = 'A test source.', "
+      + " CarbonIntensity = 2120, " + " FuelType = 'LSFO', " + " UpdateInterval = 60, "
+      + " EnergyDirection = 'consumer+generator'," + " SupportsEnergyCounters = TRUE, "
+      + " CacheWindowLength = 60, " + " CacheCheckpointInterval = 5, " + " LastMod = '"
+      + new Timestamp(new Date().getTime()).toString() + "' " + " WHERE 1=3";
+
+  /** An SQL string to drop the Source table. */
+  private static final String dropSourceTableStatement = "DROP TABLE Source";
+
+  /** The SQL string for creating the SourceHierarchy table. */
+  private static final String createSourceHierarchyTableStatement = "create table SourceHierarchy"
+      + "(" + "ParentSourceName VARCHAR(128) NOT NULL, " + " SubSourceName VARCHAR(128) NOT NULL, "
+      + " PRIMARY KEY (ParentSourceName, SubSourceName), "
+      + " FOREIGN KEY (ParentSourceName) REFERENCES Source(Name), "
+      + " FOREIGN KEY (SubSourceName) REFERENCES Source(Name)" + ")";
+
+  /** An SQL string to test whether the SourceHierarchy table exists and has the correct schema. */
+  private static final String testSourceHierarchyTableStatement =
+      " UPDATE SourceHierarchy SET "
+          + " ParentSourceName = 'db-test-source', "
+          + " SubSourceName = 'http://server.wattdepot.org:1234/wattdepot/sources/SIM_HONOLULU_8' WHERE 1=3";
+
+  /** An SQL string to drop the SourceHierarchy table. */
+  private static final String dropSourceHierarchyTableStatement = "DROP TABLE SourceHierarchy";
+
+  /** The SQL string for creating SourceProperty table. */
+  private static final String createSourcePropertyTableStatement = "create table SourceProperty"
+      + "(" + "SourceName VARCHAR(128) NOT NULL, " + " PropertyKey VARCHAR(128) NOT NULL, "
+      + " PropertyValue VARCHAR(128) NOT NULL, " + " PRIMARY KEY (SourceName, PropertyKey), "
+      + " FOREIGN KEY (SourceName) REFERENCES Source(Name)" + ")";
+
+  /** An SQL string to test whether the SourceProperty table exists and has the correct schema. */
+  private static final String testSourcePropertyTableStatement = " UPDATE SourceProperty SET "
+      + " SourceName= 'db-test-source', " + " PropertyKey = 'carbonIntensity', "
+      + " PropertyValue = '2120'" + " WHERE 1=3";
+
+  /** An SQL string to drop the SourceProperty table. */
+  private static final String dropSourcePropertyTableStatement = "DROP TABLE SourceProperty";
 
   /** {@inheritDoc} */
   @Override
@@ -302,7 +691,7 @@ public class PostgresStorageImplementation extends DbImplementation {
     ResultSet rs = null;
     SourceRef ref;
     try {
-      conn = DriverManager.getConnection(connectionUrl);
+      conn = connectionPool.getConnection();
       server.getLogger().fine(executeQueryMsg + statement);
       s = conn.prepareStatement(statement);
       rs = s.executeQuery();
@@ -310,7 +699,7 @@ public class PostgresStorageImplementation extends DbImplementation {
         ref = new SourceRef();
         String name = rs.getString("Name");
         ref.setName(name);
-        ref.setOwner(rs.getString("Owner"));
+        ref.setOwner(User.userToUri(rs.getString("Owner"), server));
         ref.setPublic(rs.getBoolean("PublicP"));
         ref.setVirtual(rs.getBoolean("Virtual"));
         ref.setCoordinates(rs.getString("Coordinates"));
@@ -352,37 +741,39 @@ public class PostgresStorageImplementation extends DbImplementation {
    */
   private Source resultSetToSource(ResultSet rs) {
     Source source = new Source();
-    String xmlString;
 
     try {
       source.setName(rs.getString("Name"));
-      source.setOwner(rs.getString("Owner"));
+      source.setOwner(User.userToUri(rs.getString("Owner"), server));
       source.setPublic(rs.getBoolean("PublicP"));
       source.setVirtual(rs.getBoolean("Virtual"));
       source.setCoordinates(rs.getString("Coordinates"));
       source.setLocation(rs.getString("Location"));
       source.setDescription(rs.getString("Description"));
-      xmlString = rs.getString("SubSources");
-      if (xmlString != null) {
-        try {
-          Unmarshaller unmarshaller = subSourcesJAXB.createUnmarshaller();
-          source.setSubSources((SubSources) unmarshaller.unmarshal(new StringReader(xmlString)));
-        }
-        catch (JAXBException e) {
-          // Got some XML from DB we can't parse
-          this.logger.warning(UNABLE_TO_PARSE_PROPERTY_XML + StackTrace.toString(e));
-        }
+
+      if (rs.getObject("CarbonIntensity") != null) {
+        source.addProperty(new Property(Source.CARBON_INTENSITY, rs.getDouble("CarbonIntensity")));
       }
-      xmlString = rs.getString("Properties");
-      if (xmlString != null) {
-        try {
-          Unmarshaller unmarshaller = propertiesJAXB.createUnmarshaller();
-          source.setProperties((Properties) unmarshaller.unmarshal(new StringReader(xmlString)));
-        }
-        catch (JAXBException e) {
-          // Got some XML from DB we can't parse
-          this.logger.warning(UNABLE_TO_PARSE_PROPERTY_XML + StackTrace.toString(e));
-        }
+      if (rs.getObject("FuelType") != null) {
+        source.addProperty(new Property(Source.FUEL_TYPE, rs.getString("FuelType")));
+      }
+      if (rs.getObject("UpdateInterval") != null) {
+        source.addProperty(new Property(Source.UPDATE_INTERVAL, rs.getInt("UpdateInterval")));
+      }
+      if (rs.getObject("EnergyDirection") != null) {
+        source.addProperty(new Property(Source.ENERGY_DIRECTION, rs.getString("EnergyDirection")));
+      }
+      if (rs.getObject("SupportsEnergyCounters") != null) {
+        source.addProperty(new Property(Source.SUPPORTS_ENERGY_COUNTERS, String.valueOf(rs
+            .getBoolean("SupportsEnergyCounters"))));
+      }
+      if (rs.getObject("CacheWindowLength") != null) {
+        source
+            .addProperty(new Property(Source.CACHE_WINDOW_LENGTH, rs.getInt("CacheWindowLength")));
+      }
+      if (rs.getObject("CacheCheckpointInterval") != null) {
+        source.addProperty(new Property(Source.CACHE_CHECKPOINT_INTERVAL, rs
+            .getInt("CacheCheckpointInterval")));
       }
     }
     catch (SQLException e) {
@@ -401,12 +792,21 @@ public class PostgresStorageImplementation extends DbImplementation {
     PreparedStatement s = null;
     ResultSet rs = null;
     try {
-      conn = DriverManager.getConnection(connectionUrl);
+      conn = connectionPool.getConnection();
       server.getLogger().fine(executeQueryMsg + statement);
       s = conn.prepareStatement(statement);
       rs = s.executeQuery();
       while (rs.next()) {
-        sources.getSource().add(resultSetToSource(rs));
+        Source source = resultSetToSource(rs);
+        if (source.isVirtual()) {
+          source.setSubSources(getSubSources(source.getName()));
+        }
+        List<Property> props = getSourceProperties(source.getName());
+        for (Property p : props) {
+          source.addProperty(p);
+        }
+
+        sources.getSource().add(source);
       }
     }
     catch (SQLException e) {
@@ -447,7 +847,7 @@ public class PostgresStorageImplementation extends DbImplementation {
       PreparedStatement s = null;
       ResultSet rs = null;
       try {
-        conn = DriverManager.getConnection(connectionUrl);
+        conn = connectionPool.getConnection();
         server.getLogger().fine(executeQueryMsg + statement);
         s = conn.prepareStatement(statement);
         s.setString(1, sourceName);
@@ -492,14 +892,22 @@ public class PostgresStorageImplementation extends DbImplementation {
       ResultSet rs = null;
       Source source = null;
       try {
-        conn = DriverManager.getConnection(connectionUrl);
+        conn = connectionPool.getConnection();
         server.getLogger().fine(executeQueryMsg + statement);
         s = conn.prepareStatement(statement);
         s.setString(1, sourceName);
         rs = s.executeQuery();
         while (rs.next()) { // the select statement must guarantee only one row is returned.
           source = resultSetToSource(rs);
+          if (source.isVirtual()) {
+            source.setSubSources(getSubSources(source.getName()));
+          }
+          List<Property> props = getSourceProperties(source.getName());
+          for (Property p : props) {
+            source.addProperty(p);
+          }
         }
+
       }
       catch (SQLException e) {
         this.logger.info("DB: Error in getSource()" + StackTrace.toString(e));
@@ -524,6 +932,101 @@ public class PostgresStorageImplementation extends DbImplementation {
     }
   }
 
+  /**
+   * Get properties for a source.
+   * 
+   * @param sourceName The source to get properties for.
+   * @return The list of properties for the source.
+   */
+  private List<Property> getSourceProperties(String sourceName) {
+    List<Property> props = new ArrayList<Property>();
+
+    Connection conn = null;
+    PreparedStatement s = null;
+    ResultSet rs = null;
+    try {
+      conn = connectionPool.getConnection();
+      String statement = "SELECT * FROM SourceProperty WHERE SourceName = ? ORDER BY PropertyKey ";
+      server.getLogger().fine(executeQueryMsg + statement);
+      s = conn.prepareStatement(statement);
+      s.setString(1, sourceName);
+      rs = s.executeQuery();
+      while (rs.next()) {
+        props.add(new Property(rs.getString("PropertyKey"), rs.getString("PropertyValue")));
+      }
+
+    }
+    catch (SQLException e) {
+      this.logger.info("DB: Error in getSourceProperties()" + StackTrace.toString(e));
+    }
+    finally {
+      try {
+        if (rs != null) {
+          rs.close();
+        }
+        if (s != null) {
+          s.close();
+        }
+        if (conn != null) {
+          conn.close();
+        }
+      }
+      catch (SQLException e) {
+        this.logger.warning(errorClosingMsg + StackTrace.toString(e));
+      }
+    }
+    return props;
+
+  }
+
+  /**
+   * Get SubSources of a source.
+   * 
+   * @param sourceName The source to get properties for.
+   * @return The SubSources for the source.
+   */
+  public SubSources getSubSources(String sourceName) {
+    SubSources subSources = new SubSources();
+
+    Connection conn = null;
+    PreparedStatement s = null;
+    ResultSet rs = null;
+    try {
+      conn = connectionPool.getConnection();
+      String statement =
+          "SELECT * FROM SourceHierarchy WHERE ParentSourceName = ? ORDER BY SubSourceName ";
+      server.getLogger().fine(executeQueryMsg + statement);
+      s = conn.prepareStatement(statement);
+      s.setString(1, sourceName);
+      rs = s.executeQuery();
+      while (rs.next()) {
+        subSources.getHref().add(Source.sourceToUri(rs.getString("SubSourceName"), server));
+      }
+
+    }
+    catch (SQLException e) {
+      this.logger.info("DB: Error in getSubSources()" + StackTrace.toString(e));
+    }
+    finally {
+      try {
+        if (rs != null) {
+          rs.close();
+        }
+        if (s != null) {
+          s.close();
+        }
+        if (conn != null) {
+          conn.close();
+        }
+      }
+      catch (SQLException e) {
+        this.logger.warning(errorClosingMsg + StackTrace.toString(e));
+      }
+    }
+    return subSources;
+
+  }
+
   /** {@inheritDoc} */
   @Override
   public SourceSummary getSourceSummary(String sourceName) {
@@ -536,93 +1039,93 @@ public class PostgresStorageImplementation extends DbImplementation {
       return null;
     }
     SourceSummary summary = new SourceSummary();
-    summary.setHref(Source.sourceToUri(sourceName, this.server.getHostName()));
+    summary.setHref(Source.sourceToUri(sourceName, this.server));
     // Want to go through sensordata for base source, and all subsources recursively
     List<Source> sourceList = getAllNonVirtualSubSources(baseSource);
-    XMLGregorianCalendar firstTimestamp = null, lastTimestamp = null, currentTimestamp = null;
+    if (sourceList.size() == 0) {
+      summary.setTotalSensorDatas(0);
+      return summary;
+    }
+    XMLGregorianCalendar firstTimestamp = null, lastTimestamp = null;
     Timestamp sqlDataTimestamp = null;
     long dataCount = 0;
     String statement;
     Connection conn = null;
     PreparedStatement s = null;
     ResultSet rs = null;
-    // examine each of the subsources in turn
-    for (Source subSource : sourceList) {
-      String subSourceName = subSource.getName();
+
+    try {
+      conn = connectionPool.getConnection();
+      // Get first timestamp, last timestamp, and count of all timestamps for this list of sources
+      statement =
+          String
+              .format(
+                  "SELECT Max(Tstamp) as maxTime, Min(Tstamp) as minTime, Count(1) as dataCount FROM SensorData WHERE Source IN (%s)",
+                  preparePlaceHolders(sourceList.size()));
+
+      server.getLogger().fine(executeQueryMsg + statement);
+      s = conn.prepareStatement(statement);
+      // Add the name of each source to the IN clause of the SQL statement
+      for (int i = 0; i < sourceList.size(); i++) {
+        s.setString(i + 1, sourceList.get(i).getName());
+      }
+
+      rs = s.executeQuery();
+      if (rs.next()) {
+        sqlDataTimestamp = rs.getTimestamp("minTime");
+        if (sqlDataTimestamp != null) {
+          firstTimestamp = Tstamp.makeTimestamp(sqlDataTimestamp);
+        }
+        sqlDataTimestamp = rs.getTimestamp("maxTime");
+        if (sqlDataTimestamp != null) {
+          lastTimestamp = Tstamp.makeTimestamp(sqlDataTimestamp);
+        }
+        dataCount = rs.getInt("dataCount");
+      }
+    }
+    catch (SQLException e) {
+      this.logger.info("DB: Error in getSourceSummary()" + StackTrace.toString(e));
+    }
+    finally {
       try {
-        // Get timestamp of first sensor data for this source
-        statement =
-            "SELECT Tstamp FROM SensorData WHERE Source = ? ORDER BY Tstamp ASC LIMIT 1";
-        conn = DriverManager.getConnection(connectionUrl);
-        server.getLogger().fine(executeQueryMsg + statement);
-        s = conn.prepareStatement(statement);
-        s.setString(1, Source.sourceToUri(subSourceName, this.server));
-        rs = s.executeQuery();
-        if (rs.next()) {
-          sqlDataTimestamp = rs.getTimestamp(1);
-          currentTimestamp = Tstamp.makeTimestamp(sqlDataTimestamp);
-          // If this is the first source examined or this source's first data is earlier than
-          // that of any sources examined so far
-          if ((firstTimestamp == null) || (Tstamp.lessThan(currentTimestamp, firstTimestamp))) {
-            firstTimestamp = currentTimestamp;
-          }
+        if (rs != null) {
+          rs.close();
         }
-        // Clean up for next query
-        rs.close();
-        s.close();
-        // Get timestamp of last sensor data for this source
-        statement =
-            "SELECT Tstamp FROM SensorData WHERE Source = ? ORDER BY Tstamp DESC LIMIT 1";
-        server.getLogger().fine(executeQueryMsg + statement);
-        s = conn.prepareStatement(statement);
-        s.setString(1, Source.sourceToUri(subSourceName, this.server));
-        rs = s.executeQuery();
-        if (rs.next()) {
-          sqlDataTimestamp = rs.getTimestamp(1);
-          currentTimestamp = Tstamp.makeTimestamp(sqlDataTimestamp);
-          // If this is the first source examined or this source's last data is later than
-          // that of any sources examined so far
-          if ((lastTimestamp == null) || (Tstamp.greaterThan(currentTimestamp, lastTimestamp))) {
-            lastTimestamp = currentTimestamp;
-          }
+        if (s != null) {
+          s.close();
         }
-        // Clean up for next query
-        rs.close();
-        s.close();
-        // Get number of sensordata rows for this source
-        statement = "SELECT COUNT(1) FROM SensorData WHERE Source = ?";
-        server.getLogger().fine(executeQueryMsg + statement);
-        s = conn.prepareStatement(statement);
-        s.setString(1, Source.sourceToUri(subSourceName, this.server));
-        rs = s.executeQuery();
-        if (rs.next()) {
-          dataCount += rs.getInt(1);
+        if (conn != null) {
+          conn.close();
         }
       }
       catch (SQLException e) {
-        this.logger.info("DB: Error in getSourceSummary()" + StackTrace.toString(e));
-      }
-      finally {
-        try {
-          if (rs != null) {
-            rs.close();
-          }
-          if (s != null) {
-            s.close();
-          }
-          if (conn != null) {
-            conn.close();
-          }
-        }
-        catch (SQLException e) {
-          this.logger.warning(errorClosingMsg + StackTrace.toString(e));
-        }
+        this.logger.warning(errorClosingMsg + StackTrace.toString(e));
       }
     }
+
     summary.setFirstSensorData(firstTimestamp);
     summary.setLastSensorData(lastTimestamp);
     summary.setTotalSensorDatas(dataCount);
     return summary;
+  }
+
+  /**
+   * Build a list of question marks separated by commas for the IN clause of a prepared statement.
+   * We need to put this in a separate method so that FindBugs doesn't complain about generating a
+   * prepared statement from a nonconstant string.
+   * 
+   * @param length The number of question marks that the string should include.
+   * @return A string of length-number question marks separated by commas.
+   */
+  private String preparePlaceHolders(int length) {
+    StringBuilder builder = new StringBuilder();
+    for (int i = 0; i < length;) {
+      builder.append("?");
+      if (++i < length) {
+        builder.append(",");
+      }
+    }
+    return builder.toString();
   }
 
   /** {@inheritDoc} */
@@ -634,61 +1137,112 @@ public class PostgresStorageImplementation extends DbImplementation {
     else {
       Connection conn = null;
       PreparedStatement s = null;
-      Marshaller propertiesMarshaller = null;
-      Marshaller subSourcesMarshaller = null;
+
       try {
-        propertiesMarshaller = propertiesJAXB.createMarshaller();
-        subSourcesMarshaller = subSourcesJAXB.createMarshaller();
-      }
-      catch (JAXBException e) {
-        this.logger.info("Unable to create marshaller" + StackTrace.toString(e));
-        return false;
-      }
-      try {
-        conn = DriverManager.getConnection(connectionUrl);
+        conn = connectionPool.getConnection();
+        if (conn.getMetaData().supportsTransactionIsolationLevel(
+            Connection.TRANSACTION_READ_COMMITTED)) {
+          conn.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+        }
+        conn.setAutoCommit(false);
         // If source exists already, then do update rather than insert IF overwrite is true
         if (sourceExists(source.getName())) {
           if (overwrite) {
             s =
-                conn.prepareStatement("UPDATE Source SET Name = ?, Owner = ?, PublicP = ?, Virtual = ?, Coordinates = ?, Location = ?, Description = ?, SubSources = ?, Properties = ?, LastMod = ? WHERE Name = ?");
-            s.setString(11, source.getName());
+                conn.prepareStatement("UPDATE Source SET Name = ?, Owner = ?, PublicP = ?, "
+                    + " Virtual = ?, Coordinates = ?, Location = ?, Description = ?, "
+                    + " CarbonIntensity = ?, FuelType = ?, UpdateInterval = ?, "
+                    + " EnergyDirection = ?, SupportsEnergyCounters = ?, CacheWindowLength = ?, "
+                    + " CacheCheckpointInterval = ?, LastMod = ? " + " WHERE Name = ?");
+            s.setString(16, source.getName());
           }
           else {
-            this.logger.fine("Derby: Attempted to overwrite without overwrite=true Source "
+            this.logger.fine("PostgreSQL: Attempted to overwrite without overwrite=true Source "
                 + source.getName());
             return false;
           }
         }
         else {
-          s = conn.prepareStatement("INSERT INTO Source VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+          s =
+              conn.prepareStatement("INSERT INTO Source VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         }
-        // Order: Name Owner PublicP Virtual Coordinates Location Description SubSources Properties
-        // LastMod
+        // Order: Name Owner PublicP Virtual Coordinates Location Description SubSources
+        // CarbonIntensity FuelType UpdateInterval EnergyDirection SupportsEnergyCounters LastMod
         s.setString(1, source.getName());
-        s.setString(2, source.getOwner());
-        s.setShort(3, booleanToShort(source.isPublic()));
-        s.setShort(4, booleanToShort(source.isVirtual()));
+        s.setString(2, UriUtils.getUriSuffix(source.getOwner()));
+        s.setBoolean(3, source.isPublic());
+        s.setBoolean(4, source.isVirtual());
         s.setString(5, source.getCoordinates());
         s.setString(6, source.getLocation());
         s.setString(7, source.getDescription());
-        if (source.isSetSubSources()) {
-          StringWriter writer = new StringWriter();
-          subSourcesMarshaller.marshal(source.getSubSources(), writer);
-          s.setString(8, writer.toString());
+
+        // initialize properties to null
+        s.setNull(8, java.sql.Types.DOUBLE);
+        s.setNull(9, java.sql.Types.VARCHAR);
+        s.setNull(10, java.sql.Types.INTEGER);
+        s.setNull(11, java.sql.Types.VARCHAR);
+        s.setNull(12, java.sql.Types.BOOLEAN);
+        s.setNull(13, java.sql.Types.INTEGER);
+        s.setNull(14, java.sql.Types.INTEGER);
+
+        if (source.isSetProperties()) {
+          if (source.getProperties().getProperty(Source.CARBON_INTENSITY) != null) {
+            s.setDouble(8, source.getProperties().getPropertyAsDouble(Source.CARBON_INTENSITY));
+          }
+          if (source.getProperties().getProperty(Source.FUEL_TYPE) != null) {
+            s.setString(9, source.getProperties().getProperty(Source.FUEL_TYPE));
+          }
+          if (source.getProperties().getProperty(Source.UPDATE_INTERVAL) != null) {
+            s.setInt(10, source.getProperties().getPropertyAsInt(Source.UPDATE_INTERVAL));
+          }
+          if (source.getProperties().getProperty(Source.ENERGY_DIRECTION) != null) {
+            s.setString(11, source.getProperties().getProperty(Source.ENERGY_DIRECTION));
+          }
+          if (source.getProperties().getProperty(Source.SUPPORTS_ENERGY_COUNTERS) != null) {
+            s.setBoolean(12, Boolean.valueOf(source.getProperties().getProperty(
+                Source.SUPPORTS_ENERGY_COUNTERS)));
+          }
+          if (source.getProperties().getProperty(Source.CACHE_WINDOW_LENGTH) != null) {
+            s.setInt(13, source.getProperties().getPropertyAsInt(Source.CACHE_WINDOW_LENGTH));
+          }
+          if (source.getProperties().getProperty(Source.CACHE_CHECKPOINT_INTERVAL) != null) {
+            s.setInt(14, source.getProperties().getPropertyAsInt(Source.CACHE_CHECKPOINT_INTERVAL));
+          }
         }
-        else {
-          s.setString(8, null);
+
+        s.setTimestamp(15, new Timestamp(new Date().getTime()));
+        s.executeUpdate();
+
+        if (overwrite) {
+          deleteSubSources(source.getName(), conn);
+          deleteSourceProperties(source.getName(), conn);
+        }
+        if (source.isSetSubSources()) {
+          for (String subSource : source.getSubSources().getHref()) {
+            s = conn.prepareStatement("INSERT INTO SourceHierarchy VALUES (?, ?) ");
+            s.setString(1, source.getName());
+            s.setString(2, UriUtils.getUriSuffix(subSource));
+            s.executeUpdate();
+          }
         }
         if (source.isSetProperties()) {
-          StringWriter writer = new StringWriter();
-          propertiesMarshaller.marshal(source.getProperties(), writer);
-          s.setString(9, writer.toString());
+          for (Property p : source.getProperties().getProperty()) {
+            if (!p.getKey().equals(Source.CARBON_INTENSITY) && !p.getKey().equals(Source.FUEL_TYPE)
+                && !p.getKey().equals(Source.UPDATE_INTERVAL)
+                && !p.getKey().equals(Source.ENERGY_DIRECTION)
+                && !p.getKey().equals(Source.SUPPORTS_ENERGY_COUNTERS)
+                && !p.getKey().equals(Source.CACHE_WINDOW_LENGTH)
+                && !p.getKey().equals(Source.CACHE_CHECKPOINT_INTERVAL)) {
+              s = conn.prepareStatement("INSERT INTO SourceProperty VALUES (?, ?, ?) ");
+              s.setString(1, source.getName());
+              s.setString(2, p.getKey());
+              s.setString(3, p.getValue());
+              s.executeUpdate();
+            }
+          }
         }
-        else {
-          s.setString(9, null);
-        }
-        s.setTimestamp(10, new Timestamp(new Date().getTime()));
-        s.executeUpdate();
+        conn.commit();
+
         this.logger.fine("PostgreSQL: Inserted Source" + source.getName());
         return true;
       }
@@ -698,14 +1252,15 @@ public class PostgresStorageImplementation extends DbImplementation {
           this.logger.fine("PostgreSQL: Attempted to overwrite Source " + source.getName());
           return false;
         }
+        else if (FOREIGN_KEY_VIOLATION.equals(e.getSQLState())) {
+          this.logger.fine("Derby: Foreign key constraint violation on Source " + source.getName()
+              + ". " + e.getMessage());
+          return false;
+        }
         else {
           this.logger.info(postgresError + StackTrace.toString(e));
           return false;
         }
-      }
-      catch (JAXBException e) {
-        this.logger.info("Unable to marshall XML field" + StackTrace.toString(e));
-        return false;
       }
       finally {
         try {
@@ -713,6 +1268,7 @@ public class PostgresStorageImplementation extends DbImplementation {
             s.close();
           }
           if (conn != null) {
+            conn.setAutoCommit(true);
             conn.close();
           }
         }
@@ -729,29 +1285,178 @@ public class PostgresStorageImplementation extends DbImplementation {
     if (sourceName == null) {
       return false;
     }
-    else {
-      deleteSensorData(sourceName);
-      String statement = "DELETE FROM Source WHERE Name='" + sourceName + "'";
-      return deleteResource(statement);
+    Connection conn = null;
+    try {
+      conn = connectionPool.getConnection();
+      conn.setAutoCommit(false);
+
+      deleteSensorData(sourceName, conn);
+      deleteSubSources(sourceName, conn);
+      deleteParentSources(sourceName, conn);
+      deleteSourceProperties(sourceName, conn);
+      String statement = "DELETE FROM Source WHERE Name='" + sourceName.replace("'", "''") + "'";
+      return deleteResource(statement, conn);
     }
+    catch (SQLException e) {
+      return false;
+    }
+    finally {
+      if (conn != null) {
+        try {
+          conn.setAutoCommit(true);
+          conn.close();
+        }
+        catch (SQLException e) { // NOPMD
+
+        }
+      }
+    }
+  }
+
+  /**
+   * Ensures that the Source with the given name is no longer present in storage. All sensor data
+   * associated with this Source will also be deleted.
+   * 
+   * @param sourceName The name of the Source.
+   * @param conn The connection encapsulating this transaction.
+   * @return True if the Source was deleted, or false if it was not deleted or the requested Source
+   * does not exist.
+   */
+  private boolean deleteSource(String sourceName, Connection conn) {
+    if (sourceName == null) {
+      return false;
+    }
+    else {
+      deleteSensorData(sourceName, conn);
+      deleteSubSources(sourceName, conn);
+      deleteParentSources(sourceName, conn);
+      deleteSourceProperties(sourceName, conn);
+      String statement = "DELETE FROM Source WHERE Name='" + sourceName.replace("'", "''") + "'";
+      return deleteResource(statement, conn);
+    }
+  }
+
+  /**
+   * Find and delete all sources that are owned by the given user.
+   * 
+   * @param username The username of the source owner.
+   * @param conn The connection encapsulating this transaction.
+   * @return True if all sources were deleted.
+   */
+  private boolean deleteSourcesForOwner(String username, Connection conn) {
+    if (username == null) {
+      return false;
+    }
+
+    String statement = "SELECT Name FROM Source WHERE Owner = ?";
+    PreparedStatement s = null;
+    ResultSet rs = null;
+    try {
+      server.getLogger().fine(executeQueryMsg + statement);
+      s = conn.prepareStatement(statement);
+      s.setString(1, username);
+      rs = s.executeQuery();
+      while (rs.next()) {
+        if (!deleteSource(rs.getString("Name"), conn)) {
+          return false;
+        }
+      }
+    }
+    catch (SQLException e) {
+      this.logger.info("DB: Error in deleteSourcesForOwner " + StackTrace.toString(e));
+      return false;
+    }
+    finally {
+      try {
+        if (rs != null) {
+          rs.close();
+        }
+        if (s != null) {
+          s.close();
+        }
+      }
+      catch (SQLException e) {
+        this.logger.warning(errorClosingMsg + StackTrace.toString(e));
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Remove the relationship between the given source and its subsources by deleting the records
+   * where the given source is listed as the parent.
+   * 
+   * @param sourceName The source to delete subsources for.
+   * @param conn The connection encapsulating this transaction.
+   * @return True if the subsources were successfully deleted.
+   */
+  private boolean deleteSubSources(String sourceName, Connection conn) {
+    return deleteResource(
+        "DELETE FROM SourceHierarchy WHERE ParentSourceName = '" + sourceName.replace("'", "''")
+            + "'", conn);
+  }
+
+  /**
+   * Remove the relationship between the given source and its parent source(s) by deleting the
+   * records where the given source is listed as the subsource.
+   * 
+   * @param sourceName The source to delete parent sources for.
+   * @param conn The connection encapsulating this transaction.
+   * @return True if the parent sources were successfully deleted.
+   */
+  private boolean deleteParentSources(String sourceName, Connection conn) {
+    return deleteResource(
+        "DELETE FROM SourceHierarchy WHERE SubSourceName='" + sourceName.replace("'", "''") + "'",
+        conn);
+  }
+
+  /**
+   * Delete a source's Property entries from SourceProperty table.
+   * 
+   * @param sourceName The source to delete properties for.
+   * @param conn The connection encapsulating this transaction.
+   * @return True if the properties were successfully deleted.
+   */
+  private boolean deleteSourceProperties(String sourceName, Connection conn) {
+    return deleteResource(
+        "DELETE FROM SourceProperty WHERE SourceName='" + sourceName.replace("'", "''") + "'", conn);
   }
 
   /** The SQL string for creating the SensorData table. */
   private static final String createSensorDataTableStatement = "create table SensorData  " + "("
       + " Tstamp TIMESTAMP NOT NULL, " + " Tool VARCHAR(128) NOT NULL, "
-      + " Source VARCHAR(256) NOT NULL, " + " Properties VARCHAR(32000), "
-      + " LastMod TIMESTAMP NOT NULL, " + " PRIMARY KEY (Source, Tstamp) " + ")";
+      + " Source VARCHAR(128) NOT NULL, " + " PowerConsumed DOUBLE PRECISION, "
+      + " EnergyConsumedToDate DOUBLE PRECISION, " + " PowerGenerated DOUBLE PRECISION, "
+      + " EnergyGeneratedToDate DOUBLE PRECISION, " + " LastMod TIMESTAMP NOT NULL, "
+      + " PRIMARY KEY (Source, Tstamp), " + " FOREIGN KEY (Source) REFERENCES Source(Name)" + ")";
 
-  /** An SQL string to test whether the User table exists and has the correct schema. */
-  private static final String testSensorDataTableStatement =
-      " UPDATE SensorData SET "
-          + " Tstamp = '"
-          + new Timestamp(new Date().getTime()).toString()
-          + "', "
-          + " Tool = 'test-db-tool', "
-          + " Source = 'test-db-source', "
-          + " Properties = '<Properties><Property><Key>powerGenerated</Key><Value>4.6E7</Value></Property></Properties>', "
-          + " LastMod = '" + new Timestamp(new Date().getTime()).toString() + "' " + " WHERE 1=3";
+  /** An SQL string to test whether the SensorData table exists and has the correct schema. */
+  private static final String testSensorDataTableStatement = " UPDATE SensorData SET "
+      + " Tstamp = '" + new Timestamp(new Date().getTime()).toString() + "', "
+      + " Tool = 'test-db-tool', " + " Source = 'test-db-source', " + " PowerConsumed='4.6E7', "
+      + " EnergyConsumedToDate='1000', " + " PowerGenerated='100.0', "
+      + " EnergyGeneratedToDate='5778.0', " + " LastMod = '"
+      + new Timestamp(new Date().getTime()).toString() + "' " + " WHERE 1=3";
+
+  /** An SQL string to drop the SensorData table. */
+  private static final String dropSensorDataTableStatement = "DROP TABLE SensorData";
+
+  /** The SQL string for creating the SensorDataProperty table. */
+  private static final String createSensorDataPropertyTableStatement =
+      "create table SensorDataProperty " + "(" + " Tstamp TIMESTAMP NOT NULL, "
+          + " Source VARCHAR(128) NOT NULL, " + " PropertyKey VARCHAR(128) NOT NULL, "
+          + " PropertyValue VARCHAR(128) NOT NULL, " + "PRIMARY KEY(Tstamp, Source, PropertyKey), "
+          + " FOREIGN KEY (Source, Tstamp) REFERENCES SensorData" + ")";
+
+  /** An SQL string to test whether the SensorDataProperty table exists and has the correct schema. */
+  private static final String testSensorDataPropertyTableStatement =
+      " UPDATE SensorDataProperty SET " + " Tstamp = '"
+          + new Timestamp(new Date().getTime()).toString() + "', " + " Source = 'test-db-source', "
+          + " PropertyKey = 'powerGenerated', " + " PropertyValue = '4.6E7' " + " WHERE 1=3";
+
+  /** An SQL string to drop the SensorDataProperty table. */
+  private static final String dropSensorDataPropertyTableStatement =
+      "DROP TABLE SensorDataProperty";
 
   /**
    * Compound index used based on this mailing list reply.
@@ -772,23 +1477,27 @@ public class PostgresStorageImplementation extends DbImplementation {
    */
   private SensorData resultSetToSensorData(ResultSet rs) {
     SensorData data = new SensorData();
-    String xmlString;
 
     try {
-      data.setTimestamp(Tstamp.makeTimestamp(rs.getTimestamp(1)));
-      data.setTool(rs.getString(2));
-      data.setSource(rs.getString(3));
-      xmlString = rs.getString(4);
-      if (xmlString != null) {
-        try {
-          Unmarshaller unmarshaller = propertiesJAXB.createUnmarshaller();
-          data.setProperties((Properties) unmarshaller.unmarshal(new StringReader(xmlString)));
-        }
-        catch (JAXBException e) {
-          // Got some XML from DB we can't parse
-          this.logger.warning(UNABLE_TO_PARSE_PROPERTY_XML + StackTrace.toString(e));
-        }
+      data.setTimestamp(Tstamp.makeTimestamp(rs.getTimestamp("Tstamp")));
+      data.setTool(rs.getString("Tool"));
+      data.setSource(Source.sourceToUri(rs.getString("Source"), server));
+
+      if (rs.getObject("PowerConsumed") != null) {
+        data.addProperty(new Property(SensorData.POWER_CONSUMED, rs.getDouble("PowerConsumed")));
       }
+      if (rs.getObject("EnergyConsumedToDate") != null) {
+        data.addProperty(new Property(SensorData.ENERGY_CONSUMED_TO_DATE, rs
+            .getDouble("EnergyConsumedToDate")));
+      }
+      if (rs.getObject("PowerGenerated") != null) {
+        data.addProperty(new Property(SensorData.POWER_GENERATED, rs.getDouble("PowerGenerated")));
+      }
+      if (rs.getObject("EnergyGeneratedToDate") != null) {
+        data.addProperty(new Property(SensorData.ENERGY_GENERATED_TO_DATE, rs
+            .getDouble("EnergyGeneratedToDate")));
+      }
+
     }
     catch (SQLException e) {
       this.logger.info("DB: Error in getSource()" + StackTrace.toString(e));
@@ -816,15 +1525,15 @@ public class PostgresStorageImplementation extends DbImplementation {
       ResultSet rs = null;
       SensorDataRef ref;
       try {
-        conn = DriverManager.getConnection(connectionUrl);
+        conn = connectionPool.getConnection();
         server.getLogger().fine(executeQueryMsg + statement);
         s = conn.prepareStatement(statement);
-        s.setString(1, Source.sourceToUri(sourceName, this.server));
+        s.setString(1, sourceName);
         rs = s.executeQuery();
         while (rs.next()) {
-          Timestamp timestamp = rs.getTimestamp(1);
-          String tool = rs.getString(2);
-          String sourceUri = rs.getString(3);
+          Timestamp timestamp = rs.getTimestamp("Tstamp");
+          String tool = rs.getString("Tool");
+          String sourceUri = Source.sourceToUri(rs.getString("Source"), server);
           ref = new SensorDataRef(Tstamp.makeTimestamp(timestamp), tool, sourceUri);
           index.getSensorDataRef().add(ref);
         }
@@ -856,38 +1565,49 @@ public class PostgresStorageImplementation extends DbImplementation {
   @Override
   public SensorDataIndex getSensorDataIndex(String sourceName, XMLGregorianCalendar startTime,
       XMLGregorianCalendar endTime) throws DbBadIntervalException {
-    if ((sourceName == null) || (startTime == null) || (endTime == null)) {
+
+    if ((sourceName == null) || (startTime == null)) {
       return null;
     }
     else if (getSource(sourceName) == null) {
       // Unknown Source name, therefore no possibility of SensorData
       return null;
     }
-    else if (startTime.compare(endTime) == DatatypeConstants.GREATER) {
+    else if (endTime != null && startTime.compare(endTime) == DatatypeConstants.GREATER) {
       // startTime > endTime, which is bogus
       throw new DbBadIntervalException(startTime, endTime);
     }
     else {
       SensorDataIndex index = new SensorDataIndex();
-      String statement =
-          "SELECT Tstamp, Tool, Source FROM SensorData WHERE Source = ? AND "
-              + " (Tstamp BETWEEN ? AND ?)" + " ORDER BY Tstamp";
+      String statement;
+      if (endTime == null) {
+        statement =
+            "SELECT Tstamp, Tool, Source FROM SensorData WHERE Source = ? AND "
+                + "Tstamp >= ? ORDER BY Tstamp";
+      }
+      else {
+        statement =
+            "SELECT Tstamp, Tool, Source FROM SensorData WHERE Source = ? AND "
+                + " (Tstamp BETWEEN ? AND ?)" + " ORDER BY Tstamp";
+      }
       Connection conn = null;
       PreparedStatement s = null;
       ResultSet rs = null;
       SensorDataRef ref;
       try {
-        conn = DriverManager.getConnection(connectionUrl);
+        conn = connectionPool.getConnection();
         server.getLogger().fine(executeQueryMsg + statement);
         s = conn.prepareStatement(statement);
-        s.setString(1, Source.sourceToUri(sourceName, this.server));
+        s.setString(1, sourceName);
         s.setTimestamp(2, Tstamp.makeTimestamp(startTime));
-        s.setTimestamp(3, Tstamp.makeTimestamp(endTime));
+        if (endTime != null) {
+          s.setTimestamp(3, Tstamp.makeTimestamp(endTime));
+        }
         rs = s.executeQuery();
         while (rs.next()) {
-          Timestamp timestamp = rs.getTimestamp(1);
-          String tool = rs.getString(2);
-          String sourceUri = rs.getString(3);
+          Timestamp timestamp = rs.getTimestamp("Tstamp");
+          String tool = rs.getString("Tool");
+          String sourceUri = Source.sourceToUri(rs.getString("Source"), server);
           ref = new SensorDataRef(Tstamp.makeTimestamp(timestamp), tool, sourceUri);
           index.getSensorDataRef().add(ref);
         }
@@ -919,35 +1639,49 @@ public class PostgresStorageImplementation extends DbImplementation {
   @Override
   public SensorDatas getSensorDatas(String sourceName, XMLGregorianCalendar startTime,
       XMLGregorianCalendar endTime) throws DbBadIntervalException {
-    if ((sourceName == null) || (startTime == null) || (endTime == null)) {
+
+    if ((sourceName == null) || (startTime == null)) {
       return null;
     }
     else if (getSource(sourceName) == null) {
       // Unknown Source name, therefore no possibility of SensorData
       return null;
     }
-    else if (startTime.compare(endTime) == DatatypeConstants.GREATER) {
+    else if (endTime != null && startTime.compare(endTime) == DatatypeConstants.GREATER) {
       // startTime > endTime, which is bogus
       throw new DbBadIntervalException(startTime, endTime);
     }
     else {
       SensorDatas datas = new SensorDatas();
-      String statement =
-          "SELECT * FROM SensorData WHERE Source = ? AND (Tstamp BETWEEN ? AND ?)"
-              + " ORDER BY Tstamp";
+      String statement;
+      if (endTime == null) {
+        statement = "SELECT * FROM SensorData WHERE Source = ? AND Tstamp >= ? ORDER BY Tstamp";
+      }
+      else {
+        statement =
+            "SELECT * FROM SensorData WHERE Source = ? AND (Tstamp BETWEEN ? AND ?)"
+                + " ORDER BY Tstamp";
+      }
       Connection conn = null;
       PreparedStatement s = null;
       ResultSet rs = null;
       try {
-        conn = DriverManager.getConnection(connectionUrl);
+        conn = connectionPool.getConnection();
         server.getLogger().fine(executeQueryMsg + statement);
         s = conn.prepareStatement(statement);
-        s.setString(1, Source.sourceToUri(sourceName, this.server));
+        s.setString(1, sourceName);
         s.setTimestamp(2, Tstamp.makeTimestamp(startTime));
-        s.setTimestamp(3, Tstamp.makeTimestamp(endTime));
+        if (endTime != null) {
+          s.setTimestamp(3, Tstamp.makeTimestamp(endTime));
+        }
         rs = s.executeQuery();
         while (rs.next()) {
-          datas.getSensorData().add(resultSetToSensorData(rs));
+          SensorData data = resultSetToSensorData(rs);
+          List<Property> props = getSensorDataProperties(sourceName, data.getTimestamp());
+          for (Property p : props) {
+            data.addProperty(p);
+          }
+          datas.getSensorData().add(data);
         }
       }
       catch (SQLException e) {
@@ -987,15 +1721,19 @@ public class PostgresStorageImplementation extends DbImplementation {
       boolean hasData = false;
       SensorData data = new SensorData();
       try {
-        conn = DriverManager.getConnection(connectionUrl);
+        conn = connectionPool.getConnection();
         server.getLogger().fine(executeQueryMsg + statement);
         s = conn.prepareStatement(statement);
-        s.setString(1, Source.sourceToUri(sourceName, this.server));
+        s.setString(1, sourceName);
         s.setTimestamp(2, Tstamp.makeTimestamp(timestamp));
         rs = s.executeQuery();
         while (rs.next()) { // the select statement must guarantee only one row is returned.
           hasData = true;
           data = resultSetToSensorData(rs);
+          List<Property> props = getSensorDataProperties(sourceName, data.getTimestamp());
+          for (Property p : props) {
+            data.addProperty(p);
+          }
         }
       }
       catch (SQLException e) {
@@ -1033,16 +1771,19 @@ public class PostgresStorageImplementation extends DbImplementation {
     boolean hasData = false;
     SensorData data = new SensorData();
     try {
-      String statement =
-          "SELECT * FROM SensorData WHERE Source = ? ORDER BY Tstamp DESC FETCH FIRST ROW ONLY";
-      conn = DriverManager.getConnection(connectionUrl);
+      conn = connectionPool.getConnection();
+      String statement = "SELECT * FROM SensorData WHERE Source = ? ORDER BY Tstamp DESC LIMIT 1";
       server.getLogger().fine(executeQueryMsg + statement);
       s = conn.prepareStatement(statement);
-      s.setString(1, Source.sourceToUri(sourceName, this.server));
+      s.setString(1, sourceName);
       rs = s.executeQuery();
       if (rs.next()) {
         hasData = true;
         data = resultSetToSensorData(rs);
+        List<Property> props = getSensorDataProperties(sourceName, data.getTimestamp());
+        for (Property p : props) {
+          data.addProperty(p);
+        }
       }
     }
     catch (SQLException e) {
@@ -1067,6 +1808,55 @@ public class PostgresStorageImplementation extends DbImplementation {
     return (hasData) ? data : null;
   }
 
+  /**
+   * Get Properties for a SensorData.
+   * 
+   * @param sourceName The source to get properties for.
+   * @param timestamp The timestamp to get properties for.
+   * @return The list of properties for the Source and Timestamp.
+   */
+  private List<Property> getSensorDataProperties(String sourceName, XMLGregorianCalendar timestamp) {
+    List<Property> props = new ArrayList<Property>();
+
+    Connection conn = null;
+    PreparedStatement s = null;
+    ResultSet rs = null;
+    try {
+      conn = connectionPool.getConnection();
+      String statement =
+          "SELECT * FROM SensorDataProperty WHERE Source = ? AND Tstamp = ? ORDER BY PropertyKey ";
+      server.getLogger().fine(executeQueryMsg + statement);
+      s = conn.prepareStatement(statement);
+      s.setString(1, sourceName);
+      s.setTimestamp(2, Tstamp.makeTimestamp(timestamp));
+      rs = s.executeQuery();
+      while (rs.next()) {
+        props.add(new Property(rs.getString("PropertyKey"), rs.getString("PropertyValue")));
+      }
+
+    }
+    catch (SQLException e) {
+      this.logger.info("DB: Error in getSensorDataProperties()" + StackTrace.toString(e));
+    }
+    finally {
+      try {
+        if (rs != null) {
+          rs.close();
+        }
+        if (s != null) {
+          s.close();
+        }
+        if (conn != null) {
+          conn.close();
+        }
+      }
+      catch (SQLException e) {
+        this.logger.warning(errorClosingMsg + StackTrace.toString(e));
+      }
+    }
+    return props;
+  }
+
   /** {@inheritDoc} */
   @Override
   public boolean hasSensorData(String sourceName, XMLGregorianCalendar timestamp) {
@@ -1084,31 +1874,63 @@ public class PostgresStorageImplementation extends DbImplementation {
     else {
       Connection conn = null;
       PreparedStatement s = null;
-      Marshaller propertiesMarshaller = null;
       try {
-        propertiesMarshaller = propertiesJAXB.createMarshaller();
-      }
-      catch (JAXBException e) {
-        this.logger.info("Unable to create marshaller" + StackTrace.toString(e));
-        return false;
-      }
-      try {
-        conn = DriverManager.getConnection(connectionUrl);
-        s = conn.prepareStatement("INSERT INTO SensorData VALUES (?, ?, ?, ?, ?)");
-        // Order: Tstamp Tool Source Properties LastMod
+        conn = connectionPool.getConnection();
+        if (conn.getMetaData().supportsTransactionIsolationLevel(
+            Connection.TRANSACTION_READ_COMMITTED)) {
+          conn.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+        }
+        conn.setAutoCommit(false);
+        s = conn.prepareStatement("INSERT INTO SensorData VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+        // Order: Tstamp Tool Source PowerConsumed EnergyConsumedToDate PowerGenerated
+        // EnergyGeneratedToDate LastMod
         s.setTimestamp(1, Tstamp.makeTimestamp(data.getTimestamp()));
         s.setString(2, data.getTool());
-        s.setString(3, data.getSource());
+        s.setString(3, UriUtils.getUriSuffix(data.getSource()));
+
+        // Initialize properties to NULL
+        s.setNull(4, java.sql.Types.DOUBLE);
+        s.setNull(5, java.sql.Types.DOUBLE);
+        s.setNull(6, java.sql.Types.DOUBLE);
+        s.setNull(7, java.sql.Types.DOUBLE);
+
         if (data.isSetProperties()) {
-          StringWriter writer = new StringWriter();
-          propertiesMarshaller.marshal(data.getProperties(), writer);
-          s.setString(4, writer.toString());
+          if (data.getProperties().getProperty(SensorData.POWER_CONSUMED) != null) {
+            s.setDouble(4, data.getProperties().getPropertyAsDouble(SensorData.POWER_CONSUMED));
+          }
+          if (data.getProperties().getProperty(SensorData.ENERGY_CONSUMED_TO_DATE) != null) {
+            s.setDouble(5,
+                data.getProperties().getPropertyAsDouble(SensorData.ENERGY_CONSUMED_TO_DATE));
+          }
+          if (data.getProperties().getProperty(SensorData.POWER_GENERATED) != null) {
+            s.setDouble(6, data.getProperties().getPropertyAsDouble(SensorData.POWER_GENERATED));
+          }
+          if (data.getProperties().getProperty(SensorData.ENERGY_GENERATED_TO_DATE) != null) {
+            s.setDouble(7,
+                data.getProperties().getPropertyAsDouble(SensorData.ENERGY_GENERATED_TO_DATE));
+          }
         }
-        else {
-          s.setString(4, null);
-        }
-        s.setTimestamp(5, new Timestamp(new Date().getTime()));
+
+        s.setTimestamp(8, new Timestamp(new Date().getTime()));
         s.executeUpdate();
+
+        if (data.isSetProperties()) {
+          for (Property p : data.getProperties().getProperty()) {
+            if (!p.getKey().equals(SensorData.POWER_CONSUMED)
+                && !p.getKey().equals(SensorData.ENERGY_CONSUMED_TO_DATE)
+                && !p.getKey().equals(SensorData.POWER_GENERATED)
+                && !p.getKey().equals(SensorData.ENERGY_GENERATED_TO_DATE)) {
+              s = conn.prepareStatement("INSERT INTO SensorDataProperty VALUES (?, ?, ?, ?) ");
+              s.setTimestamp(1, Tstamp.makeTimestamp(data.getTimestamp()));
+              s.setString(2, UriUtils.getUriSuffix(data.getSource()));
+              s.setString(3, p.getKey());
+              s.setString(4, p.getValue());
+              s.executeUpdate();
+            }
+          }
+        }
+
+        conn.commit();
         this.logger.fine("PostgreSQL: Inserted SensorData" + data.getTimestamp());
         return true;
       }
@@ -1117,14 +1939,15 @@ public class PostgresStorageImplementation extends DbImplementation {
           this.logger.fine("PostgreSQL: Attempted to overwrite SensorData " + data.getTimestamp());
           return false;
         }
+        else if (FOREIGN_KEY_VIOLATION.equals(e.getSQLState())) {
+          this.logger.fine("Derby: Foreign key constraint violation on SensorData "
+              + data.getTimestamp() + ". " + e.getMessage());
+          return false;
+        }
         else {
           this.logger.info(postgresError + StackTrace.toString(e));
           return false;
         }
-      }
-      catch (JAXBException e) {
-        this.logger.info("Unable to marshall XML field" + StackTrace.toString(e));
-        return false;
       }
       finally {
         try {
@@ -1132,6 +1955,7 @@ public class PostgresStorageImplementation extends DbImplementation {
             s.close();
           }
           if (conn != null) {
+            conn.setAutoCommit(true);
             conn.close();
           }
         }
@@ -1149,30 +1973,114 @@ public class PostgresStorageImplementation extends DbImplementation {
     if ((sourceName == null) || (timestamp == null)) {
       return false;
     }
-    else {
-      String sourceUri = Source.sourceToUri(sourceName, this.server.getHostName());
+    Connection conn = null;
+    try {
+      conn = connectionPool.getConnection();
+      conn.setAutoCommit(false);
+
+      deleteSensorDataProperties(sourceName, timestamp, conn);
       String statement =
-          "DELETE FROM SensorData WHERE Source='" + sourceUri + "' AND Tstamp='"
-              + Tstamp.makeTimestamp(timestamp) + "'";
-      succeeded = deleteResource(statement);
+          "DELETE FROM SensorData WHERE Source='" + sourceName.replace("'", "''")
+              + "' AND Tstamp='" + Tstamp.makeTimestamp(timestamp) + "'";
+      succeeded = deleteResource(statement, conn);
       return succeeded;
+    }
+    catch (SQLException e) {
+      return false;
+    }
+    finally {
+      if (conn != null) {
+        try {
+          conn.setAutoCommit(true);
+          conn.close();
+        }
+        catch (SQLException e) { // NOPMD
+
+        }
+      }
     }
   }
 
   /** {@inheritDoc} */
   @Override
   public boolean deleteSensorData(String sourceName) {
+    if (sourceName == null) {
+      return false;
+    }
+
+    Connection conn = null;
+    try {
+      conn = connectionPool.getConnection();
+      conn.setAutoCommit(false);
+      deleteSensorDataProperties(sourceName, conn);
+      String statement =
+          "DELETE FROM SensorData WHERE Source='" + sourceName.replace("'", "''") + "'";
+      return deleteResource(statement, conn);
+    }
+    catch (SQLException e) {
+      return false;
+    }
+    finally {
+      if (conn != null) {
+        try {
+          conn.setAutoCommit(true);
+          conn.close();
+        }
+        catch (SQLException e) { // NOPMD
+
+        }
+      }
+    }
+  }
+
+  /**
+   * Ensures that all sensor data from the named Source is no longer present in storage.
+   * 
+   * @param sourceName The name of the Source whose sensor data is to be deleted.
+   * @param conn The connection encapsulating this transaction.
+   * @return True if all the sensor data was deleted, or false if it was not deleted or the
+   * requested Source does not exist.
+   */
+  private boolean deleteSensorData(String sourceName, Connection conn) {
     boolean succeeded = false;
 
     if (sourceName == null) {
       return false;
     }
     else {
-      String sourceUri = Source.sourceToUri(sourceName, this.server.getHostName());
-      String statement = "DELETE FROM SensorData WHERE Source='" + sourceUri + "'";
-      succeeded = deleteResource(statement);
+      deleteSensorDataProperties(sourceName, conn);
+      String statement =
+          "DELETE FROM SensorData WHERE Source='" + sourceName.replace("'", "''") + "'";
+      succeeded = deleteResource(statement, conn);
     }
     return succeeded;
+  }
+
+  /**
+   * Delete properties from SensorDataProperty table given a sourceURI and timestamp.
+   * 
+   * @param sourceName The URI of the source to delete properties for.
+   * @param timestamp The timestamp to delete properties for.
+   * @param conn The connection encapsulating this transaction.
+   * @return True if the properties were successfully deleted.
+   */
+  private boolean deleteSensorDataProperties(String sourceName, XMLGregorianCalendar timestamp,
+      Connection conn) {
+    return deleteResource(
+        "DELETE FROM SensorDataProperty WHERE Source='" + sourceName.replace("'", "''")
+            + "' AND Tstamp='" + Tstamp.makeTimestamp(timestamp) + "'", conn);
+  }
+
+  /**
+   * Delete properties from SensorDataProperty table given a sourceURI.
+   * 
+   * @param sourceName The URI of the source to delete properties for.
+   * @param conn The connection encapsulating this transaction.
+   * @return True if the properties were successfully deleted.
+   */
+  private boolean deleteSensorDataProperties(String sourceName, Connection conn) {
+    return deleteResource(
+        "DELETE FROM SensorDataProperty WHERE Source='" + sourceName.replace("'", "''") + "'", conn);
   }
 
   /**
@@ -1185,7 +2093,7 @@ public class PostgresStorageImplementation extends DbImplementation {
    * If the given timestamp corresponds to an actual SensorData, then return a degenerate
    * SensorDataStraddle with both ends of the straddle set to the actual SensorData.
    * 
-   * @param sourceName The name of the source to generate the straddle from.
+   * @param source The source object to generate the straddle from.
    * @param timestamp The timestamp of interest in the straddle.
    * @return A SensorDataStraddle that straddles the given timestamp. Returns null if: parameters
    * are null, the source doesn't exist, source has no sensor data, or there is no sensor data that
@@ -1193,15 +2101,14 @@ public class PostgresStorageImplementation extends DbImplementation {
    * @see org.wattdepot.server.db.memory#getSensorDataStraddleList
    */
   @Override
-  public SensorDataStraddle getSensorDataStraddle(String sourceName, XMLGregorianCalendar timestamp) {
+  public SensorDataStraddle getSensorDataStraddle(Source source, XMLGregorianCalendar timestamp) {
+
     SensorData beforeData = null, afterData = null;
-    if ((sourceName == null) || (timestamp == null)) {
+    if ((source == null) || (timestamp == null)) {
       return null;
     }
-    Source source = getSource(sourceName);
-    if (source == null) {
-      return null;
-    }
+    String sourceName = source.getName();
+
     XMLGregorianCalendar dataTimestamp;
     int dataTimestampCompare;
 
@@ -1209,234 +2116,111 @@ public class PostgresStorageImplementation extends DbImplementation {
     PreparedStatement s = null;
     ResultSet rs = null;
     String statement;
-    SensorData data = getSensorData(sourceName, timestamp);
-    if (data == null) {
-      try {
-        // Find data just before desired timestamp
-        statement =
-            "SELECT Tstamp FROM SensorData WHERE Source = ? AND Tstamp < ? "
-                + "ORDER BY Tstamp DESC FETCH FIRST ROW ONLY";
-        conn = DriverManager.getConnection(connectionUrl);
-        server.getLogger().fine(executeQueryMsg + statement);
-        s = conn.prepareStatement(statement);
-        s.setString(1, Source.sourceToUri(sourceName, this.server));
-        s.setTimestamp(2, Tstamp.makeTimestamp(timestamp));
-        rs = s.executeQuery();
-        // Expecting only one row of data (fetch first row only)
-        while (rs.next()) {
-          dataTimestamp = Tstamp.makeTimestamp(rs.getTimestamp(1));
-          dataTimestampCompare = dataTimestamp.compare(timestamp);
-          if (dataTimestampCompare == DatatypeConstants.EQUAL) {
-            // There is SensorData for the requested timestamp, but we already checked for this.
-            // Thus there is a logic error somewhere
-            this.logger
-                .warning("Found sensordata that matches timestamp, but after already checked!");
-            SensorData tempData = getSensorData(sourceName, dataTimestamp);
-            return new SensorDataStraddle(timestamp, tempData, tempData);
-          }
-          else {
-            beforeData = getSensorData(sourceName, dataTimestamp);
-          }
-        }
-        // Close those statement and result set resources before we reuse the variables
-        s.close();
-        rs.close();
 
-        // Find data just after desired timestamp
-        statement =
-            "SELECT Tstamp FROM SensorData WHERE Source = ? AND Tstamp > ? "
-                + "ORDER BY Tstamp ASC FETCH FIRST ROW ONLY";
-        server.getLogger().fine(executeQueryMsg + statement);
-        s = conn.prepareStatement(statement);
-        s.setString(1, Source.sourceToUri(sourceName, this.server));
-        s.setTimestamp(2, Tstamp.makeTimestamp(timestamp));
-        rs = s.executeQuery();
-        // Expecting only one row of data (fetch first row only)
-        while (rs.next()) {
-          dataTimestamp = Tstamp.makeTimestamp(rs.getTimestamp(1));
-          dataTimestampCompare = dataTimestamp.compare(timestamp);
-          if (dataTimestampCompare == DatatypeConstants.EQUAL) {
-            // There is SensorData for the requested timestamp, but we already checked for this.
-            // Thus there is a logic error somewhere
-            this.logger
-                .warning("Found sensordata that matches timestamp, but after already checked!");
-            SensorData tempData = getSensorData(sourceName, dataTimestamp);
-            return new SensorDataStraddle(timestamp, tempData, tempData);
-          }
-          else {
-            afterData = getSensorData(sourceName, dataTimestamp);
-          }
+    try {
+      conn = connectionPool.getConnection();
+      // Find data just before desired timestamp
+      statement =
+          "Select * FROM SensorData WHERE Source = ? AND Tstamp <= ? ORDER BY Tstamp DESC LIMIT 1";
+      server.getLogger().fine(executeQueryMsg + statement);
+      s = conn.prepareStatement(statement);
+      s.setString(1, sourceName);
+      s.setTimestamp(2, Tstamp.makeTimestamp(timestamp));
+      rs = s.executeQuery();
+      // Expecting only one row of data (fetch first row only)
+      while (rs.next()) {
+        beforeData = resultSetToSensorData(rs);
+        dataTimestamp = beforeData.getTimestamp(); // Tstamp.makeTimestamp(rs.getTimestamp("Tstamp"));
+        dataTimestampCompare = dataTimestamp.compare(timestamp);
+        if (dataTimestampCompare == DatatypeConstants.EQUAL) {
+          return new SensorDataStraddle(timestamp, beforeData, beforeData);
         }
-        if ((beforeData == null) || (afterData == null)) {
-          // one of the sentinels never got changed, so no straddle
-          return null;
+      }
+      // Close those statement and result set resources before we reuse the variables
+      s.close();
+      rs.close();
+
+      // Find data just after desired timestamp
+      statement =
+          "SELECT * FROM SensorData WHERE Source = ? AND Tstamp >= ? "
+              + "ORDER BY Tstamp ASC LIMIT 1";
+      server.getLogger().fine(executeQueryMsg + statement);
+      s = conn.prepareStatement(statement);
+      s.setString(1, sourceName);
+      s.setTimestamp(2, Tstamp.makeTimestamp(timestamp));
+      rs = s.executeQuery();
+      // Expecting only one row of data (fetch first row only)
+      while (rs.next()) {
+        afterData = resultSetToSensorData(rs);
+        dataTimestamp = afterData.getTimestamp(); // Tstamp.makeTimestamp(rs.getTimestamp("Tstamp"));
+        dataTimestampCompare = dataTimestamp.compare(timestamp);
+        if (dataTimestampCompare == DatatypeConstants.EQUAL) {
+          // There is SensorData for the requested timestamp, but we already checked for this.
+          // Thus there is a logic error somewhere
+          this.logger
+              .warning("Found sensordata that matches timestamp, but after already checked!");
+          return new SensorDataStraddle(timestamp, afterData, afterData);
         }
-        else {
-          return new SensorDataStraddle(timestamp, beforeData, afterData);
+      }
+
+      if ((beforeData == null) || (afterData == null)) {
+        // one of the sentinels never got changed, so no straddle
+        return null;
+      }
+      else {
+        return new SensorDataStraddle(timestamp, beforeData, afterData);
+      }
+    }
+    catch (SQLException e) {
+      this.logger.info("DB: Error in getSensorDataStraddle()" + StackTrace.toString(e));
+      return null;
+    }
+    finally {
+      try {
+        if (rs != null) {
+          rs.close();
+        }
+        if (s != null) {
+          s.close();
+        }
+        if (conn != null) {
+          conn.close();
         }
       }
       catch (SQLException e) {
-        this.logger.info("DB: Error in getSensorDataStraddle()" + StackTrace.toString(e));
-        return null;
+        this.logger.warning(errorClosingMsg + StackTrace.toString(e));
       }
-      finally {
-        try {
-          if (rs != null) {
-            rs.close();
-          }
-          if (s != null) {
-            s.close();
-          }
-          if (conn != null) {
-            conn.close();
-          }
-        }
-        catch (SQLException e) {
-          this.logger.warning(errorClosingMsg + StackTrace.toString(e));
-        }
-      }
-    }
-    else {
-      // There is SensorData for the requested timestamp, so return degenerate
-      // SensorDataStraddle
-      return new SensorDataStraddle(timestamp, data, data);
-    }
-  }
-
-  /**
-   * Returns a list of SensorDataStraddles that straddle the given timestamp, using SensorData from
-   * all non-virtual subsources of the given source. If the given source is non-virtual, then the
-   * result will be a list containing at a single SensorDataStraddle, or null. In the case of a
-   * non-virtual source, you might as well use getSensorDataStraddle.
-   * 
-   * @param sourceName The name of the source to generate the straddle from.
-   * @param timestamp The timestamp of interest in the straddle.
-   * @return A list of SensorDataStraddles that straddle the given timestamp. Returns null if:
-   * parameters are null, the source doesn't exist, or there is no sensor data that straddles the
-   * timestamp.
-   * @see org.wattdepot.server.db.memory#getSensorDataStraddle
-   */
-  @Override
-  public List<SensorDataStraddle> getSensorDataStraddleList(String sourceName,
-      XMLGregorianCalendar timestamp) {
-    if ((sourceName == null) || (timestamp == null)) {
-      return null;
-    }
-    Source baseSource = getSource(sourceName);
-    if (baseSource == null) {
-      return null;
-    }
-    // Want to go through sensordata for base source, and all subsources recursively
-    List<Source> sourceList = getAllNonVirtualSubSources(baseSource);
-    List<SensorDataStraddle> straddleList = new ArrayList<SensorDataStraddle>(sourceList.size());
-    for (Source subSource : sourceList) {
-      String subSourceName = subSource.getName();
-      SensorDataStraddle straddle = getSensorDataStraddle(subSourceName, timestamp);
-      if (straddle == null) {
-        // No straddle for this timestamp on this source, abort
-        return null;
-      }
-      else {
-        straddleList.add(straddle);
-      }
-    }
-    if (straddleList.isEmpty()) {
-      return null;
-    }
-    else {
-      return straddleList;
-    }
-  }
-
-  /** {@inheritDoc} */
-  @Override
-  public List<StraddleList> getStraddleLists(String sourceName,
-      List<XMLGregorianCalendar> timestampList) {
-    if ((sourceName == null) || (timestampList == null)) {
-      return null;
-    }
-    Source baseSource = getSource(sourceName);
-    if (baseSource == null) {
-      return null;
-    }
-    // Want to go through sensordata for base source, and all subsources recursively
-    List<Source> sourceList = getAllNonVirtualSubSources(baseSource);
-    List<StraddleList> masterList = new ArrayList<StraddleList>(sourceList.size());
-    List<SensorDataStraddle> straddleList;
-    for (Source subSource : sourceList) {
-      straddleList = new ArrayList<SensorDataStraddle>(timestampList.size());
-      String subSourceName = subSource.getName();
-      for (XMLGregorianCalendar timestamp : timestampList) {
-        SensorDataStraddle straddle = getSensorDataStraddle(subSourceName, timestamp);
-        if (straddle == null) {
-          // No straddle for this timestamp on this source, abort
-          return null;
-        }
-        else {
-          straddleList.add(straddle);
-        }
-      }
-      if (straddleList.isEmpty()) {
-        return null;
-      }
-      else {
-        masterList.add(new StraddleList(subSource, straddleList));
-      }
-    }
-    return masterList;
-  }
-
-  /** {@inheritDoc} */
-  @Override
-  public List<List<SensorDataStraddle>> getSensorDataStraddleListOfLists(String sourceName,
-      List<XMLGregorianCalendar> timestampList) {
-    List<List<SensorDataStraddle>> masterList = new ArrayList<List<SensorDataStraddle>>();
-    if ((sourceName == null) || (timestampList == null)) {
-      return null;
-    }
-    Source baseSource = getSource(sourceName);
-    if (baseSource == null) {
-      return null;
-    }
-    // Want to go through sensordata for base source, and all subsources recursively
-    List<Source> sourceList = getAllNonVirtualSubSources(baseSource);
-    for (Source subSource : sourceList) {
-      List<SensorDataStraddle> straddleList = new ArrayList<SensorDataStraddle>();
-      String subSourceName = subSource.getName();
-      for (XMLGregorianCalendar timestamp : timestampList) {
-        SensorDataStraddle straddle = getSensorDataStraddle(subSourceName, timestamp);
-        if (straddle == null) {
-          // No straddle for this timestamp on this source, abort
-          return null;
-        }
-        else {
-          straddleList.add(straddle);
-        }
-      }
-      masterList.add(straddleList);
-    }
-    if (masterList.isEmpty()) {
-      return null;
-    }
-    else {
-      return masterList;
     }
   }
 
   /** The SQL string for creating the WattDepotUser table. So named because 'User' is reserved. */
   private static final String createUserTableStatement = "create table WattDepotUser  " + "("
       + " Username VARCHAR(128) NOT NULL, " + " Password VARCHAR(128) NOT NULL, "
-      + " Admin SMALLINT NOT NULL, " + " Properties VARCHAR(32000), "
-      + " LastMod TIMESTAMP NOT NULL, " + " PRIMARY KEY (Username) " + ")";
+      + " Admin BOOLEAN NOT NULL, " + " LastMod TIMESTAMP NOT NULL, " + " PRIMARY KEY (Username) "
+      + ")";
 
   /** An SQL string to test whether the User table exists and has the correct schema. */
-  private static final String testUserTableStatement =
-      " UPDATE WattDepotUser SET "
-          + " Username = 'TestEmail@foo.com', "
-          + " Password = 'changeme', "
-          + " Admin = 0, "
-          + " Properties = '<Properties><Property><Key>awesomeness</Key><Value>total</Value></Property></Properties>', "
-          + " LastMod = '" + new Timestamp(new Date().getTime()).toString() + "' " + " WHERE 1=3";
+  private static final String testUserTableStatement = " UPDATE WattDepotUser SET "
+      + " Username = 'TestEmail@foo.com', " + " Password = 'changeme', " + " Admin = FALSE, "
+      + " LastMod = '" + new Timestamp(new Date().getTime()).toString() + "' " + " WHERE 1=3";
+
+  /** An SQL string to drop the User table. */
+  private static final String dropUserTableStatement = "DROP TABLE WattDepotUser";
+
+  /** The SQL string for creating the WattDepotUserProperty table. */
+  private static final String createUserPropertyTableStatement =
+      "create table WattDepotUserProperty " + "(" + " Username VARCHAR(128) NOT NULL, "
+          + " PropertyKey VARCHAR(128) NOT NULL, " + " PropertyValue VARCHAR(128) NOT NULL, "
+          + " PRIMARY KEY (Username, PropertyKey), "
+          + " FOREIGN KEY (Username) REFERENCES WattDepotUser" + ")";
+
+  /** An SQL string to test whether the UserProperty table exists and has the correct schema. */
+  private static final String testUserPropertyTableStatement = " UPDATE WattDepotUserProperty SET "
+      + " Username = 'TestEmail@foo.com', " + " PropertyKey = 'awesomeness', "
+      + " PropertyValue = 'total'" + " WHERE 1=3";
+
+  /** An SQL string to drop the UserProperty table. */
+  private static final String dropUserPropertyTableStatement = "DROP TABLE WattDepotUserProperty";
 
   /** {@inheritDoc} */
   @Override
@@ -1447,7 +2231,7 @@ public class PostgresStorageImplementation extends DbImplementation {
     PreparedStatement s = null;
     ResultSet rs = null;
     try {
-      conn = DriverManager.getConnection(connectionUrl);
+      conn = connectionPool.getConnection();
       server.getLogger().fine(executeQueryMsg + statement);
       s = conn.prepareStatement(statement);
       rs = s.executeQuery();
@@ -1491,7 +2275,7 @@ public class PostgresStorageImplementation extends DbImplementation {
       boolean hasData = false;
       User user = new User();
       try {
-        conn = DriverManager.getConnection(connectionUrl);
+        conn = connectionPool.getConnection();
         server.getLogger().fine(executeQueryMsg + statement);
         s = conn.prepareStatement(statement);
         s.setString(1, username);
@@ -1501,16 +2285,10 @@ public class PostgresStorageImplementation extends DbImplementation {
           user.setEmail(rs.getString("Username"));
           user.setPassword(rs.getString("Password"));
           user.setAdmin(rs.getBoolean("Admin"));
-          String xmlString = rs.getString("Properties");
-          if (xmlString != null) {
-            try {
-              Unmarshaller unmarshaller = propertiesJAXB.createUnmarshaller();
-              user.setProperties((Properties) unmarshaller.unmarshal(new StringReader(xmlString)));
-            }
-            catch (JAXBException e) {
-              // Got some XML from DB we can't parse
-              this.logger.warning(UNABLE_TO_PARSE_PROPERTY_XML + StackTrace.toString(e));
-            }
+
+          List<Property> props = getUserProperties(username);
+          for (Property p : props) {
+            user.addProperty(p);
           }
         }
       }
@@ -1537,6 +2315,52 @@ public class PostgresStorageImplementation extends DbImplementation {
     }
   }
 
+  /**
+   * Get properties for a particular WattDepotUser.
+   * 
+   * @param username The user to get properties for.
+   * @return A list of the properties for the user.
+   */
+  private List<Property> getUserProperties(String username) {
+    List<Property> props = new ArrayList<Property>();
+    String statement =
+        "SELECT * FROM WattDepotUserProperty WHERE Username = ? ORDER BY PropertyKey";
+    Connection conn = null;
+    PreparedStatement s = null;
+    ResultSet rs = null;
+    try {
+      conn = connectionPool.getConnection();
+      server.getLogger().fine(executeQueryMsg + statement);
+      s = conn.prepareStatement(statement);
+      s.setString(1, username);
+      rs = s.executeQuery();
+      while (rs.next()) {
+        props.add(new Property(rs.getString("PropertyKey"), rs.getString("PropertyValue")));
+      }
+    }
+    catch (SQLException e) {
+      this.logger.info("DB: Error in getUserProperties()" + StackTrace.toString(e));
+    }
+    finally {
+      try {
+        if (rs != null) {
+          rs.close();
+        }
+        if (s != null) {
+          s.close();
+        }
+        if (conn != null) {
+          conn.close();
+        }
+      }
+      catch (SQLException e) {
+        this.logger.warning(errorClosingMsg + StackTrace.toString(e));
+      }
+    }
+    return props;
+
+  }
+
   /** {@inheritDoc} */
   @Override
   public boolean storeUser(User user) {
@@ -1546,31 +2370,35 @@ public class PostgresStorageImplementation extends DbImplementation {
     else {
       Connection conn = null;
       PreparedStatement s = null;
-      Marshaller marshaller = null;
+
       try {
-        marshaller = propertiesJAXB.createMarshaller();
-      }
-      catch (JAXBException e) {
-        this.logger.info("Unable to create marshaller" + StackTrace.toString(e));
-        return false;
-      }
-      try {
-        conn = DriverManager.getConnection(connectionUrl);
-        s = conn.prepareStatement("INSERT INTO WattDepotUser VALUES (?, ?, ?, ?, ?)");
-        // Order: Username Password Admin Properties LastMod
+        conn = connectionPool.getConnection();
+        if (conn.getMetaData().supportsTransactionIsolationLevel(
+            Connection.TRANSACTION_READ_COMMITTED)) {
+          conn.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+        }
+        conn.setAutoCommit(false);
+        s = conn.prepareStatement("INSERT INTO WattDepotUser VALUES (?, ?, ?, ?)");
+        // Order: Username Password Admin LastMod
         s.setString(1, user.getEmail());
         s.setString(2, user.getPassword());
-        s.setShort(3, booleanToShort(user.isAdmin()));
-        if (user.isSetProperties()) {
-          StringWriter writer = new StringWriter();
-          marshaller.marshal(user.getProperties(), writer);
-          s.setString(4, writer.toString());
-        }
-        else {
-          s.setString(4, null);
-        }
-        s.setTimestamp(5, new Timestamp(new Date().getTime()));
+        s.setBoolean(3, user.isAdmin());
+
+        s.setTimestamp(4, new Timestamp(new Date().getTime()));
         s.executeUpdate();
+        s.close();
+
+        s = conn.prepareStatement("INSERT INTO WattDepotUserProperty VALUES (?, ?, ?)");
+        s.setString(1, user.getEmail());
+        if (user.isSetProperties()) {
+          for (Property p : user.getProperties().getProperty()) {
+            s.setString(2, p.getKey());
+            s.setString(3, p.getValue());
+            s.executeUpdate();
+          }
+        }
+        conn.commit();
+
         this.logger.fine("PostgreSQL: Inserted User" + user.getEmail());
         return true;
       }
@@ -1579,14 +2407,15 @@ public class PostgresStorageImplementation extends DbImplementation {
           this.logger.fine("PostgreSQL: Attempted to overwrite User " + user.getEmail());
           return false;
         }
+        else if (FOREIGN_KEY_VIOLATION.equals(e.getSQLState())) {
+          this.logger.fine("Derby: Foreign key constraint violation on User " + user.getEmail()
+              + ". " + e.getMessage());
+          return false;
+        }
         else {
           this.logger.info(postgresError + StackTrace.toString(e));
           return false;
         }
-      }
-      catch (JAXBException e) {
-        this.logger.info("Unable to marshall Properties" + StackTrace.toString(e));
-        return false;
       }
       finally {
         try {
@@ -1594,6 +2423,7 @@ public class PostgresStorageImplementation extends DbImplementation {
             s.close();
           }
           if (conn != null) {
+            conn.setAutoCommit(true);
             conn.close();
           }
         }
@@ -1610,26 +2440,58 @@ public class PostgresStorageImplementation extends DbImplementation {
     if (username == null) {
       return false;
     }
-    else {
-      String statement = "DELETE FROM WattDepotUser WHERE Username='" + username + "'";
-      return deleteResource(statement);
-      // TODO add code to delete sources and sensordata owned by the user
+
+    Connection conn = null;
+    try {
+      conn = connectionPool.getConnection();
+      conn.setAutoCommit(false);
+      deleteSourcesForOwner(username, conn);
+      deleteUserProperties(username, conn);
+      String statement =
+          "DELETE FROM WattDepotUser WHERE Username='" + username.replace("'", "''") + "'";
+      return deleteResource(statement, conn);
     }
+    catch (SQLException e) {
+      return false;
+    }
+    finally {
+      if (conn != null) {
+        try {
+          conn.setAutoCommit(true);
+          conn.close();
+        }
+        catch (SQLException e) { // NOPMD
+
+        }
+      }
+    }
+  }
+
+  /**
+   * Delete properties from WattDepotUserProperty table given a username.
+   * 
+   * @param username The name of the user to delete properties for.
+   * @param conn The connection encapsulating this transaction.
+   * @return True if the properties were successfully deleted.
+   */
+  private boolean deleteUserProperties(String username, Connection conn) {
+    return deleteResource(
+        "DELETE FROM WattDepotUserProperty WHERE Username='" + username.replace("'", "''") + "'",
+        conn);
   }
 
   /**
    * Deletes the resource, given the SQL statement to perform the delete.
    * 
    * @param statement The SQL delete statement.
+   * @param conn The connection encapsulating this transaction.
    * @return True if resource was successfully deleted, false otherwise.
    */
-  private boolean deleteResource(String statement) {
-    Connection conn = null;
+  private boolean deleteResource(String statement, Connection conn) {
     PreparedStatement s = null;
     boolean succeeded = false;
 
     try {
-      conn = DriverManager.getConnection(connectionUrl);
       server.getLogger().fine("PostgreSQL: " + statement);
       s = conn.prepareStatement(statement);
       int rowCount = s.executeUpdate();
@@ -1651,9 +2513,6 @@ public class PostgresStorageImplementation extends DbImplementation {
         if (s != null) {
           s.close();
         }
-        if (conn != null) {
-          conn.close();
-        }
       }
       catch (SQLException e) {
         this.logger.warning(errorClosingMsg + StackTrace.toString(e));
@@ -1663,47 +2522,33 @@ public class PostgresStorageImplementation extends DbImplementation {
   }
 
   /**
-   * Converts a boolean into 1 (for true), or 0 (for false). Useful because Derby does not support
-   * the boolean SQL type, so recommended procedure is to use a SHORTINT column type with value 1 or
-   * 0.
+   * Reclaim storage space from deleted or updated tuples. PostgreSQL doesn't do this automatically
+   * (as of version 8.3) so this should be done somewhat regularly on tables that are frequently
+   * updated.
    * 
-   * @param value The boolean value.
-   * @return 1 if value is true, 0 if value is false.
+   * @return True if the maintenance succeeded
    */
-  private short booleanToShort(boolean value) {
-    return value ? (short) 1 : (short) 0;
-  }
-
-  /** {@inheritDoc} */
   @Override
   public boolean performMaintenance() {
     boolean success = false;
-    this.logger.fine("Starting to compress tables.");
+    this.logger.fine("Starting garbage collection.");
     Connection conn = null;
-    CallableStatement cs = null;
+    CallableStatement s = null;
     try {
-      conn = DriverManager.getConnection(connectionUrl);
-      cs = conn.prepareCall("CALL SYSCS_UTIL.SYSCS_COMPRESS_TABLE(?, ?, ?)");
-      cs.setString(1, "APP");
-      // Note that table names must be uppercase, even though they were created with mixed case,
-      // and SQL queries with mixed case work fine. Bah.
-      cs.setString(2, "SENSORDATA");
-      cs.setShort(3, (short) 1);
-      cs.execute();
-      cs.setString(2, "SOURCE");
-      cs.execute();
-      cs.setString(2, "WATTDEPOTUSER");
-      cs.execute();
+      conn = connectionPool.getConnection();
+      s = conn.prepareCall("VACUUM");
+      s.execute();
+      s.close();
       success = true;
     }
     catch (SQLException e) {
-      this.logger.info("PostgreSQL: Error in compressTables()" + StackTrace.toString(e));
+      this.logger.info("PostgreSQL: Error in performMaintenance()" + StackTrace.toString(e));
       success = false;
     }
     finally {
       try {
-        if (cs != null) {
-          cs.close();
+        if (s != null) {
+          s.close();
         }
         if (conn != null) {
           conn.close();
@@ -1714,8 +2559,9 @@ public class PostgresStorageImplementation extends DbImplementation {
         success = false;
       }
     }
-    this.logger.fine("Finished compressing tables.");
+    this.logger.fine("Finished garbage collection.");
     return success;
+
   }
 
   /** {@inheritDoc} */
@@ -1726,7 +2572,7 @@ public class PostgresStorageImplementation extends DbImplementation {
     Connection conn = null;
     Statement s = null;
     try {
-      conn = DriverManager.getConnection(connectionUrl);
+      conn = connectionPool.getConnection();
       s = conn.createStatement();
 
       // Note: If the db is being set up for the first time, it is not an error for the drop index
@@ -1776,42 +2622,173 @@ public class PostgresStorageImplementation extends DbImplementation {
     }
   }
 
+  /**
+   * {@inheritDoc} Multiple backup or snapshot options are available in PostgreSQL. This method
+   * assumes no prior knowledge of the Postgres installation, but it only works when the database
+   * and the code are running on the same machine. Other options could allow for a remote host, but
+   * require more knowledge about the Postgres installation. This method requires the archive_mode
+   * to be on, and works on Postgres 8.3 and above. When combined with write ahead log (WAL)
+   * archiving, this enables Point-In-Time recovery. For more information, see:
+   * http://www.postgresql.org/docs/8.3/interactive/continuous-archiving.html
+   * 
+   * This doesn't work on all systems because of permissions. Backups can also be done fairly easily
+   * outside of the WattDepot system.
+   */
   @Override
   public boolean makeSnapshot() {
     this.logger.fine("Creating snapshot of database.");
     boolean success = false;
-    String snapshotDir = server.getServerProperties().get(ServerProperties.DB_SNAPSHOT_KEY);
 
     Connection conn = null;
-    CallableStatement cs = null;
+    PreparedStatement s = null;
+    ResultSet rs = null;
     try {
-      conn = DriverManager.getConnection(connectionUrl);
-      cs = conn.prepareCall("CALL SYSCS_UTIL.SYSCS_BACKUP_DATABASE(?)");
-      cs.setString(1, snapshotDir);
-      cs.execute();
-      cs.close();
-      success = true;
+      conn = connectionPool.getConnection();
+      s = conn.prepareCall("select pg_start_backup('" + new Date().toString() + "');");
+      s.execute();
+      s.close();
+
+      // figure out where postgres stores its data
+      s = conn.prepareCall("select setting from pg_settings where name='data_directory'");
+      rs = s.executeQuery();
+      String dataPath = "";
+      if (rs.next()) {
+        dataPath = rs.getString("setting");
+
+        s.close();
+        rs.close();
+
+        // now zip the whole data directory up as a backup
+        this.logger.info("PostgreSQL: Creating zip backup from " + dataPath);
+
+        FileOutputStream fout =
+            new FileOutputStream(server.getServerProperties().get(
+                ServerProperties.POSTGRES_SNAPSHOT_KEY)
+                + ".zip");
+        ZipOutputStream zout = new ZipOutputStream(fout);
+        File fileSource = new File(dataPath);
+        addDirectory(zout, fileSource, "");
+        zout.close();
+
+        success = true;
+      }
+      else {
+        success = false;
+      }
     }
     catch (SQLException e) {
-      this.logger.info("PostgreSQL: Error in makeSnapshot()" + StackTrace.toString(e));
+      this.logger.warning("PostgreSQL: Error in makeSnapshot():" + StackTrace.toString(e));
+      success = false;
+    }
+    catch (FileNotFoundException e) {
+      this.logger.warning("PostgreSQL: Error in makeSnapshot():" + StackTrace.toString(e));
+      success = false;
+    }
+    catch (IOException e) {
+      this.logger.warning("PostgreSQL: IO Error in makeSnapshot():" + StackTrace.toString(e));
       success = false;
     }
     finally {
       try {
-        if (cs != null) {
-          cs.close();
-        }
+        // always stop backup at the end
         if (conn != null) {
-          conn.close();
+          s = conn.prepareCall("select pg_stop_backup();");
+          s.execute();
+          s.close();
         }
+
+        // don't set success = true here, because we might have had an error copying the backup.
       }
       catch (SQLException e) {
-        this.logger.warning(errorClosingMsg + StackTrace.toString(e));
+        this.logger.warning("PostgreSQL: Error stopping backup in makeSnapshot():"
+            + StackTrace.toString(e));
         success = false;
       }
+      finally {
+        try {
+          if (s != null) {
+            s.close();
+          }
+          if (conn != null) {
+            conn.close();
+          }
+          if (rs != null) {
+            rs.close();
+          }
+        }
+        catch (SQLException e) {
+          this.logger.warning(errorClosingMsg + StackTrace.toString(e));
+          success = false;
+        }
+      }
     }
-    this.logger.fine("Created snapshot of database.");
+    this.logger.fine("PostgreSQL: Created snapshot of database.");
 
     return success;
+  }
+
+  /**
+   * Recursively add everything in fileSource to zout zip file. Adapted from
+   * www.java-examples.com/create-zip-file-directory-recursively-using-zipoutputstream-example
+   * 
+   * @param zout The zip file to make
+   * @param fileSource The directory to zip
+   * @param parent The name of the parent directory
+   */
+  private void addDirectory(ZipOutputStream zout, File fileSource, String parent) {
+
+    // get sub-folder/files list
+    File[] files = fileSource.listFiles();
+    if (files != null) {
+
+      for (int i = 0; i < files.length; i++) {
+        // if the file is directory, call the function recursively
+        if (files[i].isDirectory()) {
+          if (!files[i].getName().equals("pg_xlog")) {
+            addDirectory(zout, files[i], parent + files[i].getName() + "/");
+          }
+          continue;
+        }
+
+        // it is a file and not directory, so add it to the zip file
+        try {
+          byte[] buffer = new byte[1024];
+          FileInputStream fin = new FileInputStream(files[i]);
+          zout.putNextEntry(new ZipEntry(parent + files[i].getName()));
+
+          // After creating entry in the zip file, actually write the file.
+          int length;
+
+          while ((length = fin.read(buffer)) > 0) {
+            zout.write(buffer, 0, length);
+          }
+
+          zout.closeEntry();
+          fin.close();
+
+        }
+        catch (IOException ioe) {
+          System.out.println("IOException :" + ioe);
+        }
+      }
+    }
+    else {
+      this.logger.info("PostgreSQL: makeSnapshot() tried to zip null file " + fileSource.getName());
+    }
+
+  }
+
+  /**
+   * Close the connection object pool.
+   */
+  @Override
+  public void stop() {
+    try {
+      this.connectionPool.close();
+    }
+    catch (Exception e) {
+      // TODO Auto-generated catch block
+      e.printStackTrace();
+    }
   }
 }

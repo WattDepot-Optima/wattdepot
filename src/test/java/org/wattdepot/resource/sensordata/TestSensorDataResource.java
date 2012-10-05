@@ -2,7 +2,6 @@ package org.wattdepot.resource.sensordata;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
@@ -15,21 +14,16 @@ import javax.xml.bind.JAXBException;
 import javax.xml.bind.Marshaller;
 import javax.xml.datatype.XMLGregorianCalendar;
 import org.junit.Test;
-import org.restlet.data.CharacterSet;
-import org.restlet.data.Language;
-import org.restlet.data.MediaType;
-import org.restlet.data.Method;
-import org.restlet.data.Preference;
-import org.restlet.Response;
 import org.restlet.data.Status;
-import org.restlet.representation.Representation;
-import org.restlet.representation.StringRepresentation;
+import org.restlet.resource.ClientResource;
+import org.restlet.resource.ResourceException;
 import org.wattdepot.client.BadXmlException;
 import org.wattdepot.client.NotAuthorizedException;
 import org.wattdepot.client.OverwriteAttemptedException;
 import org.wattdepot.client.ResourceNotFoundException;
 import org.wattdepot.client.WattDepotClient;
 import org.wattdepot.client.WattDepotClientException;
+import org.wattdepot.resource.ResourceInterface;
 import org.wattdepot.resource.property.jaxb.Properties;
 import org.wattdepot.resource.property.jaxb.Property;
 import org.wattdepot.resource.sensordata.jaxb.SensorData;
@@ -66,163 +60,8 @@ public class TestSensorDataResource extends ServerTestHelper {
   private static final String RETRIEVED_DATA_DOESNT_MATCH =
       "Retrieved SensorData does not match stored SensorData";
 
-  /** Making PMD happy. */
-  private static final String MISSING_SENSORDATAREFS =
-      "SensorDataIndex did not contain list of SensorDataRefs";
-
   // Tests for GET {host}/sources/{source}/sensordata
-
-  /**
-   * Tests retrieval of all SensorData from a Source. Type: public Source with no credentials.
-   * 
-   * @throws WattDepotClientException If problems are encountered
-   */
-  @Test
-  public void testFullIndexPublicWithNoCredentials() throws WattDepotClientException {
-    WattDepotClient client = new WattDepotClient(getHostName());
-    assertNotNull(MISSING_SENSORDATAREFS, client.getSensorDataIndex(defaultPublicSource)
-        .getSensorDataRef());
-  }
-
-  /**
-   * Tests retrieval of all SensorData from a Source. Type: public Source with invalid credentials.
-   * 
-   * @throws WattDepotClientException If problems are encountered
-   */
-  @Test(expected = NotAuthorizedException.class)
-  public void testFullIndexPublicBadAuth() throws WattDepotClientException {
-    // Shouldn't authenticate with invalid credentials.
-    WattDepotClient client = new WattDepotClient(getHostName(), adminEmail, "foo");
-    client.getSensorDataIndex(defaultPublicSource);
-  }
-
-  /**
-   * Tests retrieval of all SensorData from a Source. Type: public Source with valid admin
-   * credentials.
-   * 
-   * @throws WattDepotClientException If problems are encountered
-   */
-  @Test
-  public void testFullIndexPublicWithAdminCredentials() throws WattDepotClientException {
-    WattDepotClient client = new WattDepotClient(getHostName(), adminEmail, adminPassword);
-    assertNotNull(MISSING_SENSORDATAREFS, client.getSensorDataIndex(defaultPublicSource)
-        .getSensorDataRef());
-  }
-
-  /**
-   * Tests retrieval of all SensorData from a Source. Type: public Source with valid owner
-   * credentials.
-   * 
-   * @throws WattDepotClientException If problems are encountered
-   */
-  @Test
-  public void testFullIndexPublicWithOwnerCredentials() throws WattDepotClientException {
-    WattDepotClient client =
-        new WattDepotClient(getHostName(), defaultOwnerUsername, defaultOwnerPassword);
-    assertNotNull(MISSING_SENSORDATAREFS, client.getSensorDataIndex(defaultPublicSource)
-        .getSensorDataRef());
-  }
-
-  /**
-   * Tests retrieval of all SensorData from a Source. Type: public Source with valid non-owner
-   * credentials.
-   * 
-   * @throws WattDepotClientException If problems are encountered
-   */
-  @Test
-  public void testFullIndexPublicWithNonOwnerCredentials() throws WattDepotClientException {
-    WattDepotClient client =
-        new WattDepotClient(getHostName(), defaultNonOwnerUsername, defaultNonOwnerPassword);
-    assertNotNull(MISSING_SENSORDATAREFS, client.getSensorDataIndex(defaultPublicSource)
-        .getSensorDataRef());
-  }
-
-  /**
-   * Tests retrieval of all SensorData from a Source. Type: private Source with no credentials.
-   * 
-   * @throws WattDepotClientException If problems are encountered
-   */
-  @Test(expected = NotAuthorizedException.class)
-  public void testFullIndexPrivateWithNoCredentials() throws WattDepotClientException {
-    WattDepotClient client = new WattDepotClient(getHostName());
-    client.getSensorDataIndex(defaultPrivateSource);
-  }
-
-  /**
-   * Tests retrieval of all SensorData from a Source. Type: private Source with invalid credentials.
-   * 
-   * @throws WattDepotClientException If problems are encountered
-   */
-  @Test(expected = NotAuthorizedException.class)
-  public void testFullIndexPrivateBadAuth() throws WattDepotClientException {
-    // Shouldn't authenticate with no username or password
-    WattDepotClient client = new WattDepotClient(getHostName(), adminEmail, "wrong-password");
-    client.getSensorDataIndex(defaultPrivateSource);
-  }
-
-  /**
-   * Tests retrieval of all SensorData from a Source. Type: private Source with admin credentials.
-   * 
-   * @throws WattDepotClientException If problems are encountered
-   */
-  @Test
-  public void testFullIndexPrivateAdminAuth() throws WattDepotClientException {
-    // Shouldn't authenticate with no username or password
-    WattDepotClient client = new WattDepotClient(getHostName(), adminEmail, adminPassword);
-    assertNotNull(MISSING_SENSORDATAREFS, client.getSensorDataIndex(defaultPrivateSource));
-  }
-
-  /**
-   * Tests retrieval of all SensorData from a Source. Type: private Source with owner credentials.
-   * 
-   * @throws WattDepotClientException If problems are encountered
-   */
-  @Test
-  public void testFullIndexPrivateOwnerAuth() throws WattDepotClientException {
-    // Shouldn't authenticate with no username or password
-    WattDepotClient client =
-        new WattDepotClient(getHostName(), defaultOwnerUsername, defaultOwnerPassword);
-    assertNotNull(MISSING_SENSORDATAREFS, client.getSensorDataIndex(defaultPrivateSource));
-  }
-
-  /**
-   * Tests retrieval of all SensorData from a Source. Type: private Source with non-owner
-   * credentials.
-   * 
-   * @throws WattDepotClientException If problems are encountered
-   */
-  @Test(expected = NotAuthorizedException.class)
-  public void testFullIndexPrivateNonOwnerAuth() throws WattDepotClientException {
-    // Shouldn't authenticate with no username or password
-    WattDepotClient client =
-        new WattDepotClient(getHostName(), defaultNonOwnerUsername, defaultNonOwnerPassword);
-    client.getSensorDataIndex(defaultPrivateSource);
-  }
-
-  /**
-   * Tests retrieval of all SensorData from a Source. Type: unknown Source name with no credentials.
-   * 
-   * @throws WattDepotClientException If problems are encountered
-   */
-  @Test(expected = ResourceNotFoundException.class)
-  public void testFullIndexBadSourceNameAnon() throws WattDepotClientException {
-    // Shouldn't authenticate with no username or password
-    WattDepotClient client = new WattDepotClient(getHostName());
-    client.getSensorDataIndex("bogus-source-name");
-  }
-
-  /**
-   * Tests retrieval of all SensorData from a Source. Type: unknown Source name with valid
-   * credentials.
-   * 
-   * @throws WattDepotClientException If problems are encountered
-   */
-  @Test(expected = ResourceNotFoundException.class)
-  public void testFullIndexBadSourceNameAuth() throws WattDepotClientException {
-    // Shouldn't authenticate with no username or password
-    WattDepotClient client = new WattDepotClient(getHostName(), adminEmail, adminPassword);
-    client.getSensorDataIndex("bogus-source-name");
-  }
+  // Authorization tests are taken care of in WattDepotResource.
 
   /**
    * Tests that a Source starts with no SensorData. Type: public Source with valid owner
@@ -261,14 +100,14 @@ public class TestSensorDataResource extends ServerTestHelper {
     List<SensorData> origData = new ArrayList<SensorData>();
     origData.add(data1);
     origData.add(data2);
-    assertTrue("getSensorDataIndex didn't return expected SensorDataRefs", SensorDataRef
-        .compareSensorDataRefsToSensorDatas(index, origData));
+    assertTrue("getSensorDataIndex didn't return expected SensorDataRefs",
+        SensorDataRef.compareSensorDataRefsToSensorDatas(index, origData));
     assertTrue(DATA_STORE_FAILED, client.storeSensorData(data3));
     index = client.getSensorDataIndex(defaultPublicSource).getSensorDataRef();
     assertEquals("Wrong number of SensorDataRefs after store", 3, index.size());
     origData.add(data3);
-    assertTrue("getSensorDataIndex didn't return expected SensorDataRefs", SensorDataRef
-        .compareSensorDataRefsToSensorDatas(index, origData));
+    assertTrue("getSensorDataIndex didn't return expected SensorDataRefs",
+        SensorDataRef.compareSensorDataRefsToSensorDatas(index, origData));
   }
 
   /**
@@ -328,14 +167,14 @@ public class TestSensorDataResource extends ServerTestHelper {
         makeTestSensorData3();
 
     assertTrue(DATA_STORE_FAILED, storeClient.storeSensorData(data1));
-    assertEquals(RETRIEVED_DATA_DOESNT_MATCH, data1, getClient.getSensorData(defaultPublicSource,
-        data1.getTimestamp()));
+    assertEquals(RETRIEVED_DATA_DOESNT_MATCH, data1,
+        getClient.getSensorData(defaultPublicSource, data1.getTimestamp()));
     assertTrue(DATA_STORE_FAILED, storeClient.storeSensorData(data2));
-    assertEquals(RETRIEVED_DATA_DOESNT_MATCH, data2, getClient.getSensorData(defaultPublicSource,
-        data2.getTimestamp()));
+    assertEquals(RETRIEVED_DATA_DOESNT_MATCH, data2,
+        getClient.getSensorData(defaultPublicSource, data2.getTimestamp()));
     assertTrue(DATA_STORE_FAILED, storeClient.storeSensorData(data3));
-    assertEquals(RETRIEVED_DATA_DOESNT_MATCH, data3, getClient.getSensorData(defaultPublicSource,
-        data3.getTimestamp()));
+    assertEquals(RETRIEVED_DATA_DOESNT_MATCH, data3,
+        getClient.getSensorData(defaultPublicSource, data3.getTimestamp()));
   }
 
   /**
@@ -347,8 +186,10 @@ public class TestSensorDataResource extends ServerTestHelper {
   @Test(expected = ResourceNotFoundException.class)
   public void testGetWithFreshDB() throws Exception {
     WattDepotClient client = new WattDepotClient(getHostName());
-    assertNull("Able to retrieve SensorData from fresh DB", client.getSensorData(
-        defaultPublicSource, Tstamp.makeTimestamp("2009-07-28T09:00:00.000-10:00")));
+    assertNull(
+        "Able to retrieve SensorData from fresh DB",
+        client.getSensorData(defaultPublicSource,
+            Tstamp.makeTimestamp("2009-07-28T09:00:00.000-10:00")));
   }
 
   /**
@@ -361,13 +202,23 @@ public class TestSensorDataResource extends ServerTestHelper {
   public void testGetWithBadTimestamp() throws Exception {
     WattDepotClient client = new WattDepotClient(getHostName());
 
-    Response response =
-        client.makeRequest(Method.GET, Server.SOURCES_URI + "/" + defaultPublicSource + "/"
-            + Server.SENSORDATA_URI + "/" + "bogus-timestamp", new Preference<MediaType>(
-            MediaType.TEXT_XML), null);
-    Status status = response.getStatus();
-    assertEquals("Able to get SensorData with bad timestamp", Status.CLIENT_ERROR_BAD_REQUEST,
-        status);
+    ClientResource clientResource =
+        client.makeClient(Server.SOURCES_URI + "/" + defaultPublicSource + "/"
+            + Server.SENSORDATA_URI + "/" + "bogus-timestamp");
+    ResourceInterface resource = clientResource.wrap(ResourceInterface.class);
+    try {
+      resource.getXml();
+      fail("Able to get SensorData with bad timestamp");
+    }
+    catch (ResourceException e) {
+      assertEquals("Able to get SensorData with bad timestamp", Status.CLIENT_ERROR_BAD_REQUEST,
+          e.getStatus());
+      return;
+    }
+    finally {
+      clientResource.release();
+    }
+
   }
 
   // Tests for GET {host}/sources/{source}/sensordata/?startTime={timestamp}&endTime={timestamp}
@@ -407,8 +258,8 @@ public class TestSensorDataResource extends ServerTestHelper {
 
     // valid range covering no data
     assertEquals("SensorDataIndex generated for period containing no SensorData",
-        new SensorDataIndex().getSensorDataRef(), client.getSensorDataIndex(defaultPublicSource,
-            after3, moreAfter3).getSensorDataRef());
+        new SensorDataIndex().getSensorDataRef(),
+        client.getSensorDataIndex(defaultPublicSource, after3, moreAfter3).getSensorDataRef());
 
     // range covering all three data items
     List<SensorDataRef> retrievedRefs =
@@ -417,8 +268,8 @@ public class TestSensorDataResource extends ServerTestHelper {
     origData.add(data1);
     origData.add(data2);
     origData.add(data3);
-    assertTrue(REFS_DONT_MATCH_SENSORDATA, SensorDataRef.compareSensorDataRefsToSensorDatas(
-        retrievedRefs, origData));
+    assertTrue(REFS_DONT_MATCH_SENSORDATA,
+        SensorDataRef.compareSensorDataRefsToSensorDatas(retrievedRefs, origData));
 
     // range starting exactly at data1 and ending exactly at data3
     retrievedRefs = client.getSensorDataIndex(defaultPublicSource, at1, at3).getSensorDataRef();
@@ -426,24 +277,24 @@ public class TestSensorDataResource extends ServerTestHelper {
     origData.add(data1);
     origData.add(data2);
     origData.add(data3);
-    assertTrue(REFS_DONT_MATCH_SENSORDATA, SensorDataRef.compareSensorDataRefsToSensorDatas(
-        retrievedRefs, origData));
+    assertTrue(REFS_DONT_MATCH_SENSORDATA,
+        SensorDataRef.compareSensorDataRefsToSensorDatas(retrievedRefs, origData));
 
     // range covering only data1
     assertSame("getSensorDataIndex didn't contain all expected SensorData", client
         .getSensorDataIndex(defaultPublicSource, before1, between1And2).getSensorDataRef().size(),
         1);
-    assertTrue("getSensorDataIndex entry didn't match input data", client.getSensorDataIndex(
-        defaultPublicSource, before1, between1And2).getSensorDataRef().get(0).equalsSensorData(
-        data1));
+    assertTrue("getSensorDataIndex entry didn't match input data",
+        client.getSensorDataIndex(defaultPublicSource, before1, between1And2).getSensorDataRef()
+            .get(0).equalsSensorData(data1));
 
     // range covering only data2
     assertSame("getSensorDataIndex didn't contain all expected SensorData", client
         .getSensorDataIndex(defaultPublicSource, between1And2, between2And3).getSensorDataRef()
         .size(), 1);
-    assertTrue("getSensorDataIndex didn't return expected ", client.getSensorDataIndex(
-        defaultPublicSource, between1And2, between2And3).getSensorDataRef().get(0)
-        .equalsSensorData(data2));
+    assertTrue("getSensorDataIndex didn't return expected ",
+        client.getSensorDataIndex(defaultPublicSource, between1And2, between2And3)
+            .getSensorDataRef().get(0).equalsSensorData(data2));
 
     // range covering data1 & data2
     retrievedRefs =
@@ -451,8 +302,8 @@ public class TestSensorDataResource extends ServerTestHelper {
     origData.clear();
     origData.add(data1);
     origData.add(data2);
-    assertTrue(REFS_DONT_MATCH_SENSORDATA, SensorDataRef.compareSensorDataRefsToSensorDatas(
-        retrievedRefs, origData));
+    assertTrue(REFS_DONT_MATCH_SENSORDATA,
+        SensorDataRef.compareSensorDataRefsToSensorDatas(retrievedRefs, origData));
 
     // range covering data2 & data3
     retrievedRefs =
@@ -460,8 +311,8 @@ public class TestSensorDataResource extends ServerTestHelper {
     origData.clear();
     origData.add(data2);
     origData.add(data3);
-    assertTrue(REFS_DONT_MATCH_SENSORDATA, SensorDataRef.compareSensorDataRefsToSensorDatas(
-        retrievedRefs, origData));
+    assertTrue(REFS_DONT_MATCH_SENSORDATA,
+        SensorDataRef.compareSensorDataRefsToSensorDatas(retrievedRefs, origData));
   }
 
   /**
@@ -479,8 +330,9 @@ public class TestSensorDataResource extends ServerTestHelper {
     // after all three test data items
     after3 = Tstamp.makeTimestamp("2009-07-28T10:00:00.000-10:00");
 
-    assertTrue("Fresh DB contains SensorData", client.getSensorDataIndex(defaultPublicSource,
-        before1, after3).getSensorDataRef().isEmpty());
+    assertTrue("Fresh DB contains SensorData",
+        client.getSensorDataIndex(defaultPublicSource, before1, after3).getSensorDataRef()
+            .isEmpty());
   }
 
   /**
@@ -519,8 +371,8 @@ public class TestSensorDataResource extends ServerTestHelper {
   @Test(expected = ResourceNotFoundException.class)
   public void testGetLatestBadSource() throws Exception {
     WattDepotClient client = new WattDepotClient(getHostName());
-    assertNull("Able to get latest sensordata from empty DB", client
-        .getLatestSensorData("bad-source-name"));
+    assertNull("Able to get latest sensordata from empty DB",
+        client.getLatestSensorData("bad-source-name"));
   }
 
   /**
@@ -531,8 +383,8 @@ public class TestSensorDataResource extends ServerTestHelper {
   @Test(expected = ResourceNotFoundException.class)
   public void testGetLatestNoData() throws Exception {
     WattDepotClient client = new WattDepotClient(getHostName());
-    assertNull("Able to get latest sensordata from empty DB", client
-        .getLatestSensorData(defaultPublicSource));
+    assertNull("Able to get latest sensordata from empty DB",
+        client.getLatestSensorData(defaultPublicSource));
   }
 
   /**
@@ -589,30 +441,36 @@ public class TestSensorDataResource extends ServerTestHelper {
 
     // retrieve latest SensorData for non-virtual source with one SensorData
     assertTrue(UNABLE_TO_STORE_DATA, client.storeSensorData(source1Data1));
-    assertEquals(DATA_DOES_NOT_MATCH, source1Data1, client.getLatestSensorData(defaultPublicSource));
+    assertEquals(DATA_DOES_NOT_MATCH, source1Data1,
+        client.getLatestSensorData(defaultPublicSource));
     // Virtual source result should be mostly the same as source 1
     virtualData =
         new SensorData(source1Time1, SensorData.SERVER_TOOL, virtualSourceUri, source1Props1);
-    assertEquals(DATA_DOES_NOT_MATCH, virtualData, client.getLatestSensorData(defaultVirtualSource));
+    assertEquals(DATA_DOES_NOT_MATCH, virtualData,
+        client.getLatestSensorData(defaultVirtualSource));
 
     // Add later sensor data and retrieve latest SensorData
     assertTrue(UNABLE_TO_STORE_DATA, client.storeSensorData(source1Data3));
-    assertEquals(DATA_DOES_NOT_MATCH, source1Data3, client.getLatestSensorData(defaultPublicSource));
+    assertEquals(DATA_DOES_NOT_MATCH, source1Data3,
+        client.getLatestSensorData(defaultPublicSource));
     // Virtual source result should be mostly the same as source 1
     virtualData =
         new SensorData(source1Time3, SensorData.SERVER_TOOL, virtualSourceUri, source1Props3);
-    assertEquals(DATA_DOES_NOT_MATCH, virtualData, client.getLatestSensorData(defaultVirtualSource));
+    assertEquals(DATA_DOES_NOT_MATCH, virtualData,
+        client.getLatestSensorData(defaultVirtualSource));
 
     // Add sensor data in between, confirm that most recent data is still retrieved
     assertTrue(UNABLE_TO_STORE_DATA, client.storeSensorData(source1Data2));
-    assertEquals(DATA_DOES_NOT_MATCH, source1Data3, client.getLatestSensorData(defaultPublicSource));
+    assertEquals(DATA_DOES_NOT_MATCH, source1Data3,
+        client.getLatestSensorData(defaultPublicSource));
     // Virtual source result should be unchanged as well
-    assertEquals(DATA_DOES_NOT_MATCH, virtualData, client.getLatestSensorData(defaultVirtualSource));
+    assertEquals(DATA_DOES_NOT_MATCH, virtualData,
+        client.getLatestSensorData(defaultVirtualSource));
 
     // Add sensor data for second source
     assertTrue(UNABLE_TO_STORE_DATA, client.storeSensorData(source2Data1));
-    assertEquals(DATA_DOES_NOT_MATCH, source2Data1, client
-        .getLatestSensorData(defaultPrivateSource));
+    assertEquals(DATA_DOES_NOT_MATCH, source2Data1,
+        client.getLatestSensorData(defaultPrivateSource));
     // Virtual source should now have summed data with the most recent timestamp
     virtualProps = new Properties();
     // Latest source 1 POWER_CONSUMED is 50, source 2 is 80, so 50 + 80 = 130
@@ -626,21 +484,22 @@ public class TestSensorDataResource extends ServerTestHelper {
 
     virtualData =
         new SensorData(source2Time1, SensorData.SERVER_TOOL, virtualSourceUri, virtualProps);
-    assertEquals(DATA_DOES_NOT_MATCH, virtualData, client.getLatestSensorData(defaultVirtualSource));
+    assertEquals(DATA_DOES_NOT_MATCH, virtualData,
+        client.getLatestSensorData(defaultVirtualSource));
     // Test convenience methods
     assertEquals(DATA_DOES_NOT_MATCH, 130.0, client.getLatestPowerConsumed(defaultVirtualSource),
         0.001);
-    assertEquals(DATA_DOES_NOT_MATCH, 100030.0, client
-        .getLatestEnergyConsumedToDate(defaultVirtualSource), 0.001);
-    assertEquals(DATA_DOES_NOT_MATCH, 1000.0, client.getLatestPowerGenerated(defaultVirtualSource),
-        0.001);
-    assertEquals(DATA_DOES_NOT_MATCH, 5000.0, client
-        .getLatestEnergyGeneratedToDate(defaultVirtualSource), 0.001);
+    assertEquals(DATA_DOES_NOT_MATCH, 100030.0,
+        client.getLatestEnergyConsumedToDate(defaultVirtualSource), 0.001);
+    assertEquals(DATA_DOES_NOT_MATCH, 1000.0,
+        client.getLatestPowerGenerated(defaultVirtualSource), 0.001);
+    assertEquals(DATA_DOES_NOT_MATCH, 5000.0,
+        client.getLatestEnergyGeneratedToDate(defaultVirtualSource), 0.001);
 
     // Add later sensor data for second source
     assertTrue(UNABLE_TO_STORE_DATA, client.storeSensorData(source2Data2));
-    assertEquals(DATA_DOES_NOT_MATCH, source2Data2, client
-        .getLatestSensorData(defaultPrivateSource));
+    assertEquals(DATA_DOES_NOT_MATCH, source2Data2,
+        client.getLatestSensorData(defaultPrivateSource));
     // Virtual source should now have summed data with the most recent timestamp
     virtualProps = new Properties();
     // Latest source 1 POWER_CONSUMED is 50, source 2 is 120, so 50 + 120 = 170
@@ -653,8 +512,38 @@ public class TestSensorDataResource extends ServerTestHelper {
     virtualProps.getProperty().add(new Property(SensorData.ENERGY_GENERATED_TO_DATE, "5625.0"));
     virtualData =
         new SensorData(source1Time3, SensorData.SERVER_TOOL, virtualSourceUri, virtualProps);
-    assertEquals(DATA_DOES_NOT_MATCH, virtualData, client.getLatestSensorData(defaultVirtualSource));
+    assertEquals(DATA_DOES_NOT_MATCH, virtualData,
+        client.getLatestSensorData(defaultVirtualSource));
 
+  }
+
+  /**
+   * Tests getting SensorData with endTime=LATEST
+   * 
+   * @throws Exception If things go wrong during data setup.
+   */
+  @Test
+  public void testGetRangeToLatest() throws Exception {
+    WattDepotClient client =
+        new WattDepotClient(getHostName(), defaultOwnerUsername, defaultOwnerPassword);
+
+    SensorData data1 = makeTestSensorData1(), data2 = makeTestSensorData2(), data3 =
+        makeTestSensorData3();
+
+    XMLGregorianCalendar before1 = Tstamp.makeTimestamp("2009-07-28T08:00:00.000-10:00");
+    XMLGregorianCalendar between1And2 = Tstamp.makeTimestamp("2009-07-28T09:07:00.000-10:00");
+    XMLGregorianCalendar after3 = Tstamp.makeTimestamp("2009-07-28T10:00:00.000-10:00");
+
+    assertTrue(DATA_STORE_FAILED, client.storeSensorData(data1));
+    assertTrue(DATA_STORE_FAILED, client.storeSensorData(data2));
+    assertTrue(DATA_STORE_FAILED, client.storeSensorData(data3));
+
+    assertEquals("Get range to 'LATEST' returns incorrect number of index results", 3, client
+        .getSensorDataIndex(defaultPublicSource, before1).getSensorDataRef().size());
+    assertEquals("Get range to 'LATEST' returns incorrect number of results", 2, client
+        .getSensorDatas(defaultPublicSource, between1And2).size());
+    assertEquals("Get range to 'LATEST' returns incorrect number of results", 0, client
+        .getSensorDatas(defaultPublicSource, after3).size());
   }
 
   // Tests for PUT {host}/sources/{source}/sensordata/{timestamp}
@@ -672,19 +561,6 @@ public class TestSensorDataResource extends ServerTestHelper {
   }
 
   /**
-   * Tests storing SensorData to a Source. Type: public Source with invalid credentials.
-   * 
-   * @throws Exception If things go wrong during data setup.
-   */
-  @Test(expected = NotAuthorizedException.class)
-  public void testStorePublicWithBadAuth() throws Exception {
-    // Shouldn't authenticate with no username or password
-    WattDepotClient client = new WattDepotClient(getHostName(), adminEmail, "foo");
-    SensorData data = makeTestSensorData1();
-    assertFalse("Able to store SensorData with bad credentials", client.storeSensorData(data));
-  }
-
-  /**
    * Tests storing SensorData to a Source. Type: public Source with valid admin credentials.
    * 
    * @throws Exception If things go wrong during data setup.
@@ -694,8 +570,8 @@ public class TestSensorDataResource extends ServerTestHelper {
     WattDepotClient client = new WattDepotClient(getHostName(), adminEmail, adminPassword);
     SensorData data = makeTestSensorData1();
     assertTrue("Unable to store SensorData with admin credentials", client.storeSensorData(data));
-    assertEquals(RETRIEVED_DATA_DOESNT_MATCH, data, client.getSensorData(defaultPublicSource, data
-        .getTimestamp()));
+    assertEquals(RETRIEVED_DATA_DOESNT_MATCH, data,
+        client.getSensorData(defaultPublicSource, data.getTimestamp()));
   }
 
   /**
@@ -708,10 +584,10 @@ public class TestSensorDataResource extends ServerTestHelper {
     WattDepotClient client =
         new WattDepotClient(getHostName(), defaultOwnerUsername, defaultOwnerPassword);
     SensorData data = makeTestSensorData1();
-    assertTrue("Unable to store SensorData with valid owner credentials", client
-        .storeSensorData(data));
-    assertEquals(RETRIEVED_DATA_DOESNT_MATCH, data, client.getSensorData(defaultPublicSource, data
-        .getTimestamp()));
+    assertTrue("Unable to store SensorData with valid owner credentials",
+        client.storeSensorData(data));
+    assertEquals(RETRIEVED_DATA_DOESNT_MATCH, data,
+        client.getSensorData(defaultPublicSource, data.getTimestamp()));
   }
 
   /**
@@ -724,8 +600,8 @@ public class TestSensorDataResource extends ServerTestHelper {
     WattDepotClient client =
         new WattDepotClient(getHostName(), defaultNonOwnerUsername, defaultNonOwnerPassword);
     SensorData data = makeTestSensorData1();
-    assertFalse("Able to store SensorData with valid non-owner credentials", client
-        .storeSensorData(data));
+    assertFalse("Able to store SensorData with valid non-owner credentials",
+        client.storeSensorData(data));
   }
 
   /**
@@ -741,18 +617,6 @@ public class TestSensorDataResource extends ServerTestHelper {
   }
 
   /**
-   * Tests storing SensorData to a Source. Type: private Source with invalid credentials.
-   * 
-   * @throws Exception If problems are encountered.
-   */
-  @Test(expected = NotAuthorizedException.class)
-  public void testStorePrivateBadAuth() throws Exception {
-    WattDepotClient client = new WattDepotClient(getHostName(), adminEmail, "wrong-password");
-    SensorData data = makeTestSensorDataPrivateSource();
-    assertFalse("Able to store SensorData with invalid credentials", client.storeSensorData(data));
-  }
-
-  /**
    * Tests storing SensorData to a Source. Type: private Source with admin credentials.
    * 
    * @throws Exception If problems are encountered.
@@ -762,8 +626,8 @@ public class TestSensorDataResource extends ServerTestHelper {
     WattDepotClient client = new WattDepotClient(getHostName(), adminEmail, adminPassword);
     SensorData data = makeTestSensorDataPrivateSource();
     assertTrue("Unable to store SensorData with admin credentials", client.storeSensorData(data));
-    assertEquals(RETRIEVED_DATA_DOESNT_MATCH, data, client.getSensorData(defaultPrivateSource, data
-        .getTimestamp()));
+    assertEquals(RETRIEVED_DATA_DOESNT_MATCH, data,
+        client.getSensorData(defaultPrivateSource, data.getTimestamp()));
   }
 
   /**
@@ -777,8 +641,8 @@ public class TestSensorDataResource extends ServerTestHelper {
         new WattDepotClient(getHostName(), defaultOwnerUsername, defaultOwnerPassword);
     SensorData data = makeTestSensorDataPrivateSource();
     assertTrue("Unable to store SensorData with owner credentials", client.storeSensorData(data));
-    assertEquals(RETRIEVED_DATA_DOESNT_MATCH, data, client.getSensorData(defaultPrivateSource, data
-        .getTimestamp()));
+    assertEquals(RETRIEVED_DATA_DOESNT_MATCH, data,
+        client.getSensorData(defaultPrivateSource, data.getTimestamp()));
   }
 
   /**
@@ -791,9 +655,10 @@ public class TestSensorDataResource extends ServerTestHelper {
     WattDepotClient client =
         new WattDepotClient(getHostName(), defaultNonOwnerUsername, defaultNonOwnerPassword);
     SensorData data = makeTestSensorDataPrivateSource();
-    assertFalse("Able to store SensorData with non-owner credentials", client.storeSensorData(data));
-    assertEquals(RETRIEVED_DATA_DOESNT_MATCH, data, client.getSensorData(defaultPrivateSource, data
-        .getTimestamp()));
+    assertFalse("Able to store SensorData with non-owner credentials",
+        client.storeSensorData(data));
+    assertEquals(RETRIEVED_DATA_DOESNT_MATCH, data,
+        client.getSensorData(defaultPrivateSource, data.getTimestamp()));
   }
 
   /**
@@ -829,16 +694,24 @@ public class TestSensorDataResource extends ServerTestHelper {
     Marshaller marshaller = sensorDataJAXB.createMarshaller();
     StringWriter writer = new StringWriter();
     marshaller.marshal(data, writer);
-    Representation rep =
-        new StringRepresentation(writer.toString(), MediaType.TEXT_XML, Language.ALL,
-            CharacterSet.UTF_8);
-    Response response =
-        client.makeRequest(Method.PUT, Server.SOURCES_URI + "/"
-            + UriUtils.getUriSuffix(data.getSource()) + "/" + Server.SENSORDATA_URI + "/"
-            + "bogus-timestamp", new Preference<MediaType>(MediaType.TEXT_XML), rep);
-    Status status = response.getStatus();
-    assertEquals("Able to store SensorData with bad timestamp", Status.CLIENT_ERROR_BAD_REQUEST,
-        status);
+
+    ClientResource clientResource =
+        client.makeClient(Server.SOURCES_URI + "/" + UriUtils.getUriSuffix(data.getSource()) + "/"
+            + Server.SENSORDATA_URI + "/" + "bogus-timestamp");
+    ResourceInterface resource = clientResource.wrap(ResourceInterface.class);
+
+    try {
+      resource.store(writer.toString());
+      fail("Able to store SensorData with bad timestamp");
+    }
+    catch (ResourceException e) {
+      assertEquals("Able to store SensorData with bad timestamp", Status.CLIENT_ERROR_BAD_REQUEST,
+          e.getStatus());
+      return;
+    }
+    finally {
+      clientResource.release();
+    }
   }
 
   /**
@@ -852,13 +725,24 @@ public class TestSensorDataResource extends ServerTestHelper {
             server));
     // Can't use WattDepotClient.storeSensorData() to test this, as it is unable to send empty
     // body. Have to do things manually.
-    Response response =
-        client.makeRequest(Method.PUT, Server.SOURCES_URI + "/"
-            + UriUtils.getUriSuffix(data.getSource()) + "/" + Server.SENSORDATA_URI + "/"
-            + data.getTimestamp().toString(), new Preference<MediaType>(MediaType.TEXT_XML), null);
-    Status status = response.getStatus();
-    assertEquals("Able to store SensorData with no entity body", Status.CLIENT_ERROR_BAD_REQUEST,
-        status);
+
+    ClientResource clientResource =
+        client.makeClient(Server.SOURCES_URI + "/" + UriUtils.getUriSuffix(data.getSource()) + "/"
+            + Server.SENSORDATA_URI + "/" + data.getTimestamp().toString());
+    ResourceInterface resource = clientResource.wrap(ResourceInterface.class);
+
+    try {
+      resource.store(null);
+      fail("Able to store SensorData with no entity body");
+    }
+    catch (ResourceException e) {
+      assertEquals("Able to store SensorData with no entity body",
+          Status.CLIENT_ERROR_BAD_REQUEST, e.getStatus());
+      return;
+    }
+    finally {
+      clientResource.release();
+    }
   }
 
   /**
@@ -872,15 +756,24 @@ public class TestSensorDataResource extends ServerTestHelper {
             server));
     // Can't use WattDepotClient.storeSensorData() to test this, as it is unable to send empty
     // body. Have to do things manually.
-    Representation rep =
-        new StringRepresentation("", MediaType.TEXT_XML, Language.ALL, CharacterSet.UTF_8);
-    Response response =
-        client.makeRequest(Method.PUT, Server.SOURCES_URI + "/"
-            + UriUtils.getUriSuffix(data.getSource()) + "/" + Server.SENSORDATA_URI + "/"
-            + data.getTimestamp().toString(), new Preference<MediaType>(MediaType.TEXT_XML), rep);
-    Status status = response.getStatus();
-    assertEquals("Able to store SensorData with empty entity body",
-        Status.CLIENT_ERROR_BAD_REQUEST, status);
+
+    ClientResource clientResource =
+        client.makeClient(Server.SOURCES_URI + "/" + UriUtils.getUriSuffix(data.getSource()) + "/"
+            + Server.SENSORDATA_URI + "/" + data.getTimestamp().toString());
+    ResourceInterface resource = clientResource.wrap(ResourceInterface.class);
+
+    try {
+      resource.store("");
+      fail("Able to store SensorData with empty entity body");
+    }
+    catch (ResourceException e) {
+      assertEquals("Able to store SensorData with empty entity body",
+          Status.CLIENT_ERROR_BAD_REQUEST, e.getStatus());
+      return;
+    }
+    finally {
+      clientResource.release();
+    }
   }
 
   /**
@@ -894,16 +787,23 @@ public class TestSensorDataResource extends ServerTestHelper {
             server));
     // Can't use WattDepotClient.storeSensorData() to test this, as it is unable to send bogus XML.
     // Have to do things manually.
-    Representation rep =
-        new StringRepresentation("bogus-non-XML", MediaType.TEXT_XML, Language.ALL,
-            CharacterSet.UTF_8);
-    Response response =
-        client.makeRequest(Method.PUT, Server.SOURCES_URI + "/"
-            + UriUtils.getUriSuffix(data.getSource()) + "/" + Server.SENSORDATA_URI + "/"
-            + data.getTimestamp().toString(), new Preference<MediaType>(MediaType.TEXT_XML), rep);
-    Status status = response.getStatus();
-    assertEquals("Able to store SensorData with bogus XML in entity body",
-        Status.CLIENT_ERROR_BAD_REQUEST, status);
+    ClientResource clientResource =
+        client.makeClient(Server.SOURCES_URI + "/" + UriUtils.getUriSuffix(data.getSource()) + "/"
+            + Server.SENSORDATA_URI + "/" + data.getTimestamp().toString());
+    ResourceInterface resource = clientResource.wrap(ResourceInterface.class);
+
+    try {
+      resource.store("bogus-non-XML");
+      fail("Able to store SensorData with bogus XML in entity body");
+    }
+    catch (ResourceException e) {
+      assertEquals("Able to store SensorData with bogus XML in entity body",
+          Status.CLIENT_ERROR_BAD_REQUEST, e.getStatus());
+      return;
+    }
+    finally {
+      clientResource.release();
+    }
   }
 
   /**
@@ -925,18 +825,27 @@ public class TestSensorDataResource extends ServerTestHelper {
     Marshaller marshaller = sensorDataJAXB.createMarshaller();
     StringWriter writer = new StringWriter();
     marshaller.marshal(data, writer);
-    Representation rep =
-        new StringRepresentation(writer.toString(), MediaType.TEXT_XML, Language.ALL,
-            CharacterSet.UTF_8);
+
     // make timestamp 1 hour later in URI
     XMLGregorianCalendar uriTimestamp = Tstamp.incrementHours(timestamp, 1);
-    Response response =
-        client.makeRequest(Method.PUT, Server.SOURCES_URI + "/"
-            + UriUtils.getUriSuffix(data.getSource()) + "/" + Server.SENSORDATA_URI + "/"
-            + uriTimestamp.toString(), new Preference<MediaType>(MediaType.TEXT_XML), rep);
-    Status status = response.getStatus();
-    assertEquals("Able to store SensorData with mismatching timestamps between URI and body",
-        Status.CLIENT_ERROR_BAD_REQUEST, status);
+
+    ClientResource clientResource =
+        client.makeClient(Server.SOURCES_URI + "/" + UriUtils.getUriSuffix(data.getSource()) + "/"
+            + Server.SENSORDATA_URI + "/" + uriTimestamp.toString());
+    ResourceInterface resource = clientResource.wrap(ResourceInterface.class);
+
+    try {
+      resource.store(writer.toString());
+      fail("Able to store SensorData with mismatching timestamps between URI and body");
+    }
+    catch (ResourceException e) {
+      assertEquals("Able to store SensorData with mismatching timestamps between URI and body",
+          Status.CLIENT_ERROR_BAD_REQUEST, e.getStatus());
+      return;
+    }
+    finally {
+      clientResource.release();
+    }
   }
 
   /**
@@ -958,17 +867,24 @@ public class TestSensorDataResource extends ServerTestHelper {
     Marshaller marshaller = sensorDataJAXB.createMarshaller();
     StringWriter writer = new StringWriter();
     marshaller.marshal(data, writer);
-    Representation rep =
-        new StringRepresentation(writer.toString(), MediaType.TEXT_XML, Language.ALL,
-            CharacterSet.UTF_8);
-    // make timestamp 1 hour later in URI
-    Response response =
-        client.makeRequest(Method.PUT, Server.SOURCES_URI + "/" + defaultPublicSource + "/"
-            + Server.SENSORDATA_URI + "/" + data.getTimestamp().toString(),
-            new Preference<MediaType>(MediaType.TEXT_XML), rep);
-    Status status = response.getStatus();
-    assertEquals("Able to store SensorData with mismatching source name between URI and body",
-        Status.CLIENT_ERROR_BAD_REQUEST, status);
+
+    ClientResource clientResource =
+        client.makeClient(Server.SOURCES_URI + "/" + defaultPublicSource + "/"
+            + Server.SENSORDATA_URI + "/" + data.getTimestamp().toString());
+    ResourceInterface resource = clientResource.wrap(ResourceInterface.class);
+
+    try {
+      resource.store(writer.toString());
+      fail("Able to store SensorData with mismatching source name between URI and body");
+    }
+    catch (ResourceException e) {
+      assertEquals("Able to store SensorData with mismatching source name between URI and body",
+          Status.CLIENT_ERROR_BAD_REQUEST, e.getStatus());
+      return;
+    }
+    finally {
+      clientResource.release();
+    }
   }
 
   /**
@@ -1006,10 +922,10 @@ public class TestSensorDataResource extends ServerTestHelper {
     assertTrue(DATA_STORE_FAILED, client.storeSensorData(data2));
     assertTrue(DATA_STORE_FAILED, client.storeSensorData(data3));
 
-    assertTrue("Unable to delete SensorData", client.deleteSensorData(defaultPublicSource, data2
-        .getTimestamp()));
-    assertNull("Able to retrieve deleted SensorData", client.getSensorData(data2.getSource(), data2
-        .getTimestamp()));
+    assertTrue("Unable to delete SensorData",
+        client.deleteSensorData(defaultPublicSource, data2.getTimestamp()));
+    assertNull("Able to retrieve deleted SensorData",
+        client.getSensorData(defaultPublicSource, data2.getTimestamp()));
   }
 
   /**
@@ -1017,7 +933,7 @@ public class TestSensorDataResource extends ServerTestHelper {
    * 
    * @throws Exception If problems are encountered.
    */
-  @Test(expected = ResourceNotFoundException.class)
+  @Test
   public void testDeleteAllSensorData() throws Exception {
     WattDepotClient client =
         new WattDepotClient(getHostName(), defaultOwnerUsername, defaultOwnerPassword);
@@ -1028,11 +944,12 @@ public class TestSensorDataResource extends ServerTestHelper {
     assertTrue(DATA_STORE_FAILED, client.storeSensorData(data2));
     assertTrue(DATA_STORE_FAILED, client.storeSensorData(data3));
 
-    assertEquals("Some expected SensorData not stored", 3, client.getSensorDataIndex(
-        data2.getSource()).getSensorDataRef().size());
-    assertTrue("Unable to delete all SensorData for Source", client
-        .deleteAllSensorData(defaultPublicSource));
-    assertEquals("Able to retrieve deleted SensorData", 0, client.getSensorDataIndex(
-        data2.getSource()).getSensorDataRef().size());
+    assertEquals("Some expected SensorData not stored", 3,
+        client.getSensorDataIndex(UriUtils.getUriSuffix(data2.getSource())).getSensorDataRef()
+            .size());
+    assertTrue("Unable to delete all SensorData for Source",
+        client.deleteAllSensorData(defaultPublicSource));
+    assertEquals("Able to retrieve deleted SensorData", 0,
+        client.getSensorDataIndex(defaultPublicSource).getSensorDataRef().size());
   }
 }

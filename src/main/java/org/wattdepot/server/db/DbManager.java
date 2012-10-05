@@ -2,12 +2,18 @@ package org.wattdepot.server.db;
 
 import static org.wattdepot.server.ServerProperties.DB_IMPL_KEY;
 import java.lang.reflect.Constructor;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import javax.xml.datatype.XMLGregorianCalendar;
+import org.wattdepot.resource.property.jaxb.Properties;
+import org.wattdepot.resource.property.jaxb.Property;
 import org.wattdepot.resource.sensordata.SensorDataStraddle;
 import org.wattdepot.resource.sensordata.StraddleList;
 import org.wattdepot.resource.sensordata.jaxb.SensorData;
 import org.wattdepot.resource.sensordata.jaxb.SensorDataIndex;
+import org.wattdepot.resource.sensordata.jaxb.SensorDataRef;
 import org.wattdepot.resource.sensordata.jaxb.SensorDatas;
 import org.wattdepot.resource.source.jaxb.Source;
 import org.wattdepot.resource.source.jaxb.SourceIndex;
@@ -17,7 +23,10 @@ import org.wattdepot.resource.user.jaxb.User;
 import org.wattdepot.resource.user.jaxb.UserIndex;
 import org.wattdepot.server.Server;
 import org.wattdepot.server.ServerProperties;
+import org.wattdepot.server.cache.DataCache;
 import org.wattdepot.util.StackTrace;
+import org.wattdepot.util.UriUtils;
+import org.wattdepot.util.tstamp.Tstamp;
 
 /**
  * Provides an interface to storage for the resources managed by the WattDepot server. Portions of
@@ -29,10 +38,13 @@ import org.wattdepot.util.StackTrace;
 public class DbManager {
 
   /** The chosen Storage system. */
-  private DbImplementation dbImpl;
+  protected DbImplementation dbImpl;
 
   /** The server using this DbManager. */
   protected Server server;
+
+  /** The cache to use for this DbManager. */
+  protected DataCache cache;
 
   /**
    * Creates a new DbManager which manages access to the underlying persistency layer(s). Choice of
@@ -79,18 +91,20 @@ public class DbManager {
       throw new IllegalArgumentException(e);
     }
     // Next, try to find a constructor that accepts a Server as its parameter.
-    Class<?>[] constructorParam = { org.wattdepot.server.Server.class };
+    Class<?>[] constructorParam =
+        { org.wattdepot.server.Server.class, org.wattdepot.server.db.DbManager.class };
     Constructor<?> dbConstructor = null;
     try {
       dbConstructor = dbClass.getConstructor(constructorParam);
     }
     catch (Exception e) {
-      String msg = "DB error instantiating " + dbClassName + ". Could not find Constructor(server)";
+      String msg =
+          "DB error instantiating " + dbClassName + ". Could not find Constructor(server)";
       server.getLogger().warning(msg + "\n" + StackTrace.toString(e));
       throw new IllegalArgumentException(e);
     }
     // Next, try to create an instance of DbImplementation from the Constructor.
-    Object[] serverArg = { server };
+    Object[] serverArg = { server, this };
     try {
       this.dbImpl = (DbImplementation) dbConstructor.newInstance(serverArg);
     }
@@ -112,6 +126,11 @@ public class DbManager {
       if (!this.dbImpl.storeUser(adminUser)) {
         server.getLogger().severe("Unable to create admin user on DbManager creation!");
       }
+    }
+
+    this.cache = new DataCache();
+    if (wipe) {
+      this.cache.wipeData();
     }
   }
 
@@ -189,6 +208,7 @@ public class DbManager {
    * does not exist.
    */
   public boolean deleteSource(String sourceName) {
+    this.cache.deleteSensorData(sourceName, null);
     return this.dbImpl.deleteSource(sourceName);
   }
 
@@ -202,7 +222,66 @@ public class DbManager {
    * sourceName is invalid.
    */
   public SensorDataIndex getSensorDataIndex(String sourceName) {
-    return this.dbImpl.getSensorDataIndex(sourceName);
+    SensorDataIndex index = this.dbImpl.getSensorDataIndex(sourceName);
+    SensorDataIndex cacheIndex = this.cache.getSensorDataIndex(sourceName);
+    if (cacheIndex != null && cacheIndex.getSensorDataRef().size() > 0) {
+      for (SensorDataRef ref : cacheIndex.getSensorDataRef()) {
+        if (!index.getSensorDataRef().contains(ref)) {
+          index.getSensorDataRef().add(ref);
+        }
+      }
+      if (index != null) {
+        Collections.sort(index.getSensorDataRef());
+      }
+    }
+    return index;
+  }
+
+  /**
+   * Returns the SensorDataIndex representing all the SensorData resources for the named Source such
+   * that their timestamp is greater than or equal to the given start time. If the Source has no
+   * appropriate SensorData resources, the index will be empty (not null). The list will be sorted
+   * in order of increasing timestamp values.
+   * 
+   * @param sourceName The name of the Source whose sensor data is to be returned.
+   * @param startTime The earliest Sensor Data to be returned.
+   * @throws DbBadIntervalException if startTime is later than endTime.
+   * @return a SensorDataIndex object containing all relevant sensor data resources, or null if
+   * sourceName, startTime, or endTime are invalid.
+   */
+  public SensorDataIndex getSensorDataIndex(String sourceName, XMLGregorianCalendar startTime)
+      throws DbBadIntervalException {
+    if (sourceName == null || startTime == null) {
+      return null;
+    }
+
+    SensorDataIndex index;
+    // If we can get a sensor data straddle for the startTime from cache, then the whole time range
+    // is cached and we can skip disk storage.
+    if (this.cache.getSensorDataStraddle(sourceName, startTime) != null) {
+      index = this.cache.getSensorDataIndex(sourceName, startTime, null);
+      if (index != null) {
+        Collections.sort(index.getSensorDataRef());
+      }
+    }
+
+    else {
+      // Otherwise, combine disk storage with cache.
+      index = this.dbImpl.getSensorDataIndex(sourceName, startTime, null);
+      SensorDataIndex cacheIndex = this.cache.getSensorDataIndex(sourceName, startTime, null);
+      if (cacheIndex != null && cacheIndex.getSensorDataRef().size() > 0) {
+        for (SensorDataRef ref : cacheIndex.getSensorDataRef()) {
+          if (!index.getSensorDataRef().contains(ref)) {
+            index.getSensorDataRef().add(ref);
+          }
+        }
+      }
+      if (index != null) {
+        Collections.sort(index.getSensorDataRef());
+      }
+    }
+
+    return index;
   }
 
   /**
@@ -220,7 +299,80 @@ public class DbManager {
    */
   public SensorDataIndex getSensorDataIndex(String sourceName, XMLGregorianCalendar startTime,
       XMLGregorianCalendar endTime) throws DbBadIntervalException {
-    return this.dbImpl.getSensorDataIndex(sourceName, startTime, endTime);
+    if (sourceName == null || startTime == null || endTime == null) {
+      return null;
+    }
+
+    SensorDataIndex index;
+    // If we can get a sensor data straddle for the startTime from cache, then the whole time range
+    // is cached and we can skip disk storage.
+    if (this.cache.getSensorDataStraddle(sourceName, startTime) != null) {
+      index = this.cache.getSensorDataIndex(sourceName, startTime, endTime);
+      if (index != null) {
+        Collections.sort(index.getSensorDataRef());
+      }
+    }
+    else {
+      // Otherwise, combine disk storage with cache.
+      index = this.dbImpl.getSensorDataIndex(sourceName, startTime, endTime);
+      SensorDataIndex cacheIndex = this.cache.getSensorDataIndex(sourceName, startTime, endTime);
+      if (cacheIndex != null && cacheIndex.getSensorDataRef().size() > 0) {
+        for (SensorDataRef ref : cacheIndex.getSensorDataRef()) {
+          if (!index.getSensorDataRef().contains(ref)) {
+            index.getSensorDataRef().add(ref);
+          }
+        }
+        if (index != null) {
+          Collections.sort(index.getSensorDataRef());
+        }
+      }
+    }
+    return index;
+  }
+
+  /**
+   * Returns a list of all SensorData resources representing all the SensorData resources for the
+   * named Source such that their timestamp is greater than or equal to the given start time. If the
+   * Source has no appropriate SensorData resources, the SensorDatas will be empty (not null). The
+   * list will be sorted in order of increasing timestamp values.
+   * 
+   * @param sourceName The name of the Source whose sensor data is to be returned.
+   * @param startTime The earliest Sensor Data to be returned.
+   * @throws DbBadIntervalException if startTime is later than endTime.
+   * @return a SensorDatas object containing all relevant sensor data resources, or null if
+   * sourceName, startTime, or endTime are invalid.
+   */
+  public SensorDatas getSensorDatas(String sourceName, XMLGregorianCalendar startTime)
+      throws DbBadIntervalException {
+    if (sourceName == null || startTime == null) {
+      return null;
+    }
+
+    SensorDatas datas;
+    // If we can get a sensor data straddle for the startTime from cache, then the whole time range
+    // is cached and we can skip disk storage.
+    if (this.cache.getSensorDataStraddle(sourceName, startTime) != null) {
+      datas = this.cache.getSensorDatas(sourceName, startTime, null);
+      if (datas != null) {
+        Collections.sort(datas.getSensorData());
+      }
+    }
+    else {
+      // Otherwise, combine disk storage with cache.
+      datas = this.dbImpl.getSensorDatas(sourceName, startTime, null);
+      SensorDatas cacheDatas = this.cache.getSensorDatas(sourceName, startTime, null);
+      if (cacheDatas != null && cacheDatas.getSensorData().size() > 0) {
+        for (SensorData d : cacheDatas.getSensorData()) {
+          if (!datas.getSensorData().contains(d)) {
+            datas.getSensorData().add(d);
+          }
+        }
+        if (datas != null) {
+          Collections.sort(datas.getSensorData());
+        }
+      }
+    }
+    return datas;
   }
 
   /**
@@ -239,7 +391,35 @@ public class DbManager {
    */
   public SensorDatas getSensorDatas(String sourceName, XMLGregorianCalendar startTime,
       XMLGregorianCalendar endTime) throws DbBadIntervalException {
-    return this.dbImpl.getSensorDatas(sourceName, startTime, endTime);
+    if (sourceName == null || startTime == null || endTime == null) {
+      return null;
+    }
+
+    SensorDatas datas;
+    // If we can get a sensor data straddle for the startTime from cache, then the whole time range
+    // is cached and we can skip disk storage.
+    if (this.cache.getSensorDataStraddle(sourceName, startTime) != null) {
+      datas = this.cache.getSensorDatas(sourceName, startTime, endTime);
+      if (datas != null) {
+        Collections.sort(datas.getSensorData());
+      }
+    }
+    else {
+      // Otherwise, combine disk storage with cache.
+      datas = this.dbImpl.getSensorDatas(sourceName, startTime, endTime);
+      SensorDatas cacheDatas = this.cache.getSensorDatas(sourceName, startTime, endTime);
+      if (cacheDatas != null && cacheDatas.getSensorData().size() > 0) {
+        for (SensorData d : cacheDatas.getSensorData()) {
+          if (!datas.getSensorData().contains(d)) {
+            datas.getSensorData().add(d);
+          }
+        }
+        if (datas != null) {
+          Collections.sort(datas.getSensorData());
+        }
+      }
+    }
+    return datas;
   }
 
   /**
@@ -251,6 +431,10 @@ public class DbManager {
    * @return The SensorData resource, or null.
    */
   public SensorData getSensorData(String sourceName, XMLGregorianCalendar timestamp) {
+    SensorData cached = this.cache.getSensorData(sourceName, timestamp);
+    if (cached != null) {
+      return cached;
+    }
     return this.dbImpl.getSensorData(sourceName, timestamp);
   }
 
@@ -267,7 +451,64 @@ public class DbManager {
    * @return The SensorData resource, or null.
    */
   public SensorData getLatestSensorData(String sourceName) {
-    return this.dbImpl.getLatestSensorData(sourceName);
+    if (sourceName == null) {
+      return null;
+    }
+    Source baseSource = getSource(sourceName);
+    if (baseSource == null) {
+      return null;
+    }
+    if (baseSource.isVirtual()) {
+      // Storing combined properties as Map while summing to make life easier
+      Map<String, Double> combinedMap = new LinkedHashMap<String, Double>();
+      XMLGregorianCalendar combinedTimestamp = null;
+      // Want to go through sensordata for base source, and all subsources recursively
+      List<Source> sourceList = getAllNonVirtualSubSources(baseSource);
+      for (Source subSource : sourceList) {
+        String subSourceName = subSource.getName();
+        SensorData data = this.cache.getLatestSensorData(subSourceName);
+        if (data == null) {
+          // Not in cache, try persistent store
+          data = this.dbImpl.getLatestNonVirtualSensorData(subSourceName); 
+        }
+        if (data != null) {
+          // record this timestamp if it is the first we've seen or is most recent so far
+          if ((combinedTimestamp == null)
+              || (Tstamp.lessThan(data.getTimestamp(), combinedTimestamp))) {
+            combinedTimestamp = data.getTimestamp();
+          }
+          // iterate over all properties found in data
+          for (Property prop : data.getProperties().getProperty()) {
+            Double combinedValue = combinedMap.get(prop.getKey());
+            if (combinedValue == null) {
+              // The combined property list does not have this property yet, so just add it verbatim
+              combinedMap.put(prop.getKey(), Double.valueOf(prop.getValue()));
+            }
+            else {
+              // Must add this property's value to existing sum. Assumes all sensor data properties
+              // are doubles, which is questionable
+              double newValue = combinedValue + Double.valueOf(prop.getValue());
+              combinedMap.put(prop.getKey(), newValue);
+            }
+          }
+        }
+      }
+      // Convert map to Properties
+      Properties combinedProps = new Properties();
+      for (Map.Entry<String, Double> entry : combinedMap.entrySet()) {
+        combinedProps.getProperty().add(new Property(entry.getKey(), entry.getValue().toString()));
+      }
+      return new SensorData(combinedTimestamp, SensorData.SERVER_TOOL, baseSource.toUri(server),
+          combinedProps);
+    }
+    else {
+      // Non-virtual source, just return latest sensor data
+      SensorData cached = this.cache.getLatestSensorData(sourceName);
+      if (cached != null) {
+        return cached;
+      }
+      return this.dbImpl.getLatestNonVirtualSensorData(sourceName);
+    }
   }
 
   /**
@@ -278,18 +519,87 @@ public class DbManager {
    * @return True if there is any sensor data for this timestamp.
    */
   public boolean hasSensorData(String sourceName, XMLGregorianCalendar timestamp) {
+    if (this.cache.getSensorData(sourceName, timestamp) != null) {
+      return true;
+    }
     return this.dbImpl.hasSensorData(sourceName, timestamp);
   }
 
   /**
-   * Persists a SensorData instance. If SensorData with this [Source, timestamp] already exists in
-   * the storage system, no action is performed and the method returns false.
+   * Persists a SensorData instance to storage, but does not cache it. If SensorData with this
+   * [Source, timestamp] already exists in the storage system, no action is performed and the method
+   * returns false.
    * 
    * @param data The sensor data.
    * @return True if the sensor data was successfully stored.
+   * @throws DatatypeConfigurationException
    */
-  public boolean storeSensorData(SensorData data) {
+  public boolean storeSensorDataNoCache(SensorData data) {
     return this.dbImpl.storeSensorData(data);
+  }
+
+  /**
+   * Caches a SensorData instance, and persists it to storage depending on the source properties and
+   * the current cache state. If SensorData with this [Source, timestamp] already exists in the
+   * storage system, no action is performed and the method returns false.
+   * 
+   * If CACHE_CHECKPOINT_INTERVAL and CACHE_WINDOW_LENGTH properties in the source are both either
+   * null or set to zero, don't cache.
+   * 
+   * If cache storage fails, disk storage is attempted and returns true if successful. If disk
+   * storage is required and fails, sensor data is not stored in cache and method returns false.
+   * This means that the cache may not always be up to date with the disk storage, but disk storage
+   * will always be up to date with cache (as required by CACHE_CHECKPOINT_INTERVAL).
+   * 
+   * @param data The sensor data.
+   * @param source A source with optional CACHE_CHECKPOINT_INTERVAL and CACHE_WINDOW_LENGTH
+   * properties to use for this sensor data.
+   * @return True if the sensor data was successfully stored to cache and disk if required.
+   */
+  public boolean storeSensorData(SensorData data, Source source) {
+    // Get the source name from the sensor data because we don't enforce that the given source
+    // object matches the sensor data's source.
+    String sourceName = UriUtils.getUriSuffix(data.getSource());
+    int checkpointInterval = 0;
+    if (source.getProperty(Source.CACHE_CHECKPOINT_INTERVAL) != null) {
+      checkpointInterval = (int) source.getPropertyAsDouble(Source.CACHE_CHECKPOINT_INTERVAL);
+    }
+    int windowLength = 0;
+    if (source.getProperty(Source.CACHE_WINDOW_LENGTH) != null) {
+      windowLength = (int) source.getPropertyAsDouble(Source.CACHE_WINDOW_LENGTH);
+    }
+
+    if (checkpointInterval == 0 && windowLength == 0) {
+      return storeSensorDataNoCache(data);
+    }
+
+    if (this.cache.storeSensorData(data, windowLength)) {
+      // If caching worked, do we need to persist to storage also?
+      if (this.cache.shouldPersist(sourceName, data.getTimestamp(), checkpointInterval)) {
+        if (this.dbImpl.storeSensorData(data)) {
+          // If persist to storage worked, save checkpoint time.
+          this.cache.putSourceCheckpointTimestamp(sourceName, data.getTimestamp());
+          return true;
+        }
+        else {
+          // If saving to cache worked but storage didn't, let's remove it from cache and
+          // return the error to the user so they can try again.
+          this.cache.deleteSensorData(sourceName, data.getTimestamp());
+          return false;
+        }
+      }
+      else {
+        return true;
+      }
+    }
+    // If caching didn't work, persist to storage. It will be slower but still accessible.
+    else if (this.dbImpl.storeSensorData(data)) {
+      this.cache.putSourceCheckpointTimestamp(sourceName, data.getTimestamp());
+      return true;
+    }
+    else {
+      return false;
+    }
   }
 
   /**
@@ -302,7 +612,18 @@ public class DbManager {
    * sensor data or Source does not exist.
    */
   public boolean deleteSensorData(String sourceName, XMLGregorianCalendar timestamp) {
-    return this.dbImpl.deleteSensorData(sourceName, timestamp);
+    boolean cacheDelete = this.cache.deleteSensorData(sourceName, timestamp);
+
+    if (cacheDelete) {
+      XMLGregorianCalendar checkpoint = this.cache.getSourceCheckpointTimestamp(sourceName);
+      if (checkpoint != null && checkpoint.equals(timestamp)) {
+        this.cache.deleteSourceCheckpointTimestamp(sourceName);
+      }
+    }
+
+    boolean dbDelete = this.dbImpl.deleteSensorData(sourceName, timestamp);
+
+    return cacheDelete || dbDelete;
   }
 
   /**
@@ -313,6 +634,9 @@ public class DbManager {
    * requested Source does not exist.
    */
   public boolean deleteSensorData(String sourceName) {
+    this.cache.deleteSensorData(sourceName);
+    this.cache.deleteSourceCheckpointTimestamp(sourceName);
+
     return this.dbImpl.deleteSensorData(sourceName);
   }
 
@@ -326,15 +650,23 @@ public class DbManager {
    * If the given timestamp corresponds to an actual SensorData, then return a degenerate
    * SensorDataStraddle with both ends of the straddle set to the actual SensorData.
    * 
-   * @param sourceName The name of the source to generate the straddle from.
+   * @param source The source object to generate the straddle from.
    * @param timestamp The timestamp of interest in the straddle.
    * @return A SensorDataStraddle that straddles the given timestamp. Returns null if: parameters
    * are null, the source doesn't exist, source has no sensor data, or there is no sensor data that
    * straddles the timestamp.
    * @see org.wattdepot.server.db.memory#getSensorDataStraddleList
    */
-  public SensorDataStraddle getSensorDataStraddle(String sourceName, XMLGregorianCalendar timestamp) {
-    return this.dbImpl.getSensorDataStraddle(sourceName, timestamp);
+  public SensorDataStraddle getSensorDataStraddle(Source source, XMLGregorianCalendar timestamp) {
+    if (source == null) {
+      return null;
+    }
+    SensorDataStraddle cached = this.cache.getSensorDataStraddle(source.getName(), timestamp);
+    if (cached != null) {
+      return cached;
+    }
+
+    return this.dbImpl.getSensorDataStraddle(source, timestamp);
   }
 
   /**
@@ -343,16 +675,16 @@ public class DbManager {
    * result will be a list containing at a single SensorDataStraddle, or null. In the case of a
    * non-virtual source, you might as well use getSensorDataStraddle.
    * 
-   * @param sourceName The name of the source to generate the straddle from.
+   * @param source The source object to generate the straddle from.
    * @param timestamp The timestamp of interest in the straddle.
    * @return A list of SensorDataStraddles that straddle the given timestamp. Returns null if:
    * parameters are null, the source doesn't exist, or there is no sensor data that straddles the
    * timestamp.
    * @see org.wattdepot.server.db.memory#getSensorDataStraddle
    */
-  public List<SensorDataStraddle> getSensorDataStraddleList(String sourceName,
+  public List<SensorDataStraddle> getSensorDataStraddleList(Source source,
       XMLGregorianCalendar timestamp) {
-    return this.dbImpl.getSensorDataStraddleList(sourceName, timestamp);
+    return this.dbImpl.getSensorDataStraddleList(source, timestamp);
   }
 
   /**
@@ -362,52 +694,64 @@ public class DbManager {
    * virtual source, the result is a list of StraddleLists, one for each non-virtual subsource
    * (determined recursively).
    * 
-   * @param sourceName The name of the source to generate the straddle from.
+   * @param source The source object to generate the straddle from.
    * @param timestampList The list of timestamps of interest in each straddle.
    * @return A list of StraddleLists. Returns null if: parameters are null, the source doesn't
    * exist, or there is no sensor data that straddles any of the timestamps.
    * @see org.wattdepot.server.db.memory#getSensorDataStraddle
    */
-  public List<StraddleList> getStraddleLists(String sourceName,
+  public List<StraddleList> getStraddleLists(Source source,
       List<XMLGregorianCalendar> timestampList) {
-    return this.dbImpl.getStraddleLists(sourceName, timestampList);
+    return this.dbImpl.getStraddleLists(source, timestampList);
   }
 
   /**
-   * Given a virtual source name, and a List of timestamps, returns a List (one member for each
+   * Given a virtual source and a List of timestamps, returns a List (one member for each
    * non-virtual subsource) that contains Lists of SensorDataStraddles that straddle each of the
    * given timestamps. If the given source is non-virtual, then the result will be a list containing
    * a single List of SensorDataStraddles, or null.
    * 
-   * @param sourceName The name of the source to generate the straddle from.
+   * @param source The source object to generate the straddle from.
    * @param timestampList The list of timestamps of interest in each straddle.
    * @return A list of lists of SensorDataStraddles that straddle the given timestamp. Returns null
    * if: parameters are null, the source doesn't exist, or there is no sensor data that straddles
    * any of the timestamps.
    * @see org.wattdepot.server.db.memory#getSensorDataStraddle getSensorDataStraddle
    */
-  public List<List<SensorDataStraddle>> getSensorDataStraddleListOfLists(String sourceName,
+  public List<List<SensorDataStraddle>> getSensorDataStraddleListOfLists(Source source,
       List<XMLGregorianCalendar> timestampList) {
-    return this.dbImpl.getSensorDataStraddleListOfLists(sourceName, timestampList);
+    return this.dbImpl.getSensorDataStraddleListOfLists(source, timestampList);
   }
 
   /**
-   * Returns the power in SensorData format for the Source name given in the URI and the given
-   * timestamp, or null if no power data exists.
+   * Returns the power in SensorData format for the given Source name and timestamp, or null if no
+   * power data exists.
    * 
-   * @param sourceName The source name.
+   * @param sourceName The name of the source.
    * @param timestamp The timestamp requested.
    * @return The requested power in SensorData format, or null if it cannot be found/calculated.
    */
   public SensorData getPower(String sourceName, XMLGregorianCalendar timestamp) {
-    return this.dbImpl.getPower(sourceName, timestamp);
+    return this.getPower(this.getSource(sourceName), timestamp);
+  }
+
+  /**
+   * Returns the power in SensorData format for the given Source and timestamp, or null if no power
+   * data exists.
+   * 
+   * @param source The source object.
+   * @param timestamp The timestamp requested.
+   * @return The requested power in SensorData format, or null if it cannot be found/calculated.
+   */
+  public SensorData getPower(Source source, XMLGregorianCalendar timestamp) {
+    return this.dbImpl.getPower(source, timestamp);
   }
 
   /**
    * Returns the energy in SensorData format for the Source name given over the range of time
    * between startTime and endTime, or null if no energy data exists.
    * 
-   * @param sourceName The source name.
+   * @param sourceName The name of the source.
    * @param startTime The start of the range requested.
    * @param endTime The start of the range requested.
    * @param interval The sampling interval requested.
@@ -415,14 +759,55 @@ public class DbManager {
    */
   public SensorData getEnergy(String sourceName, XMLGregorianCalendar startTime,
       XMLGregorianCalendar endTime, int interval) {
-    return this.dbImpl.getEnergy(sourceName, startTime, endTime, interval);
+    return this.getEnergy(this.getSource(sourceName), startTime, endTime, interval);
+  }
+
+  /**
+   * Returns the energy in SensorData format for the Source name given after the startTime, or null
+   * if no energy data exists.
+   * 
+   * @param sourceName The name of the source.
+   * @param startTime The start of the range requested.
+   * @param interval The sampling interval requested.
+   * @return The requested energy in SensorData format, or null if it cannot be found/calculated.
+   */
+  public SensorData getEnergy(String sourceName, XMLGregorianCalendar startTime, int interval) {
+    return this.getEnergy(this.getSource(sourceName), startTime, null, interval);
+  }
+
+  /**
+   * Returns the energy in SensorData format for the Source given over the range of time between
+   * startTime and endTime, or null if no energy data exists.
+   * 
+   * @param source The source object.
+   * @param startTime The start of the range requested.
+   * @param endTime The start of the range requested.
+   * @param interval The sampling interval requested in minutes.
+   * @return The requested energy in SensorData format, or null if it cannot be found/calculated.
+   */
+  public SensorData getEnergy(Source source, XMLGregorianCalendar startTime,
+      XMLGregorianCalendar endTime, int interval) {
+    return this.dbImpl.getEnergy(source, startTime, endTime, interval);
+  }
+
+  /**
+   * Returns the energy in SensorData format for the Source given after the startTime, or null if no
+   * energy data exists.
+   * 
+   * @param source The source object.
+   * @param startTime The start of the range requested.
+   * @param interval The sampling interval requested in minutes.
+   * @return The requested energy in SensorData format, or null if it cannot be found/calculated.
+   */
+  public SensorData getEnergy(Source source, XMLGregorianCalendar startTime, int interval) {
+    return this.getEnergy(source, startTime, null, interval);
   }
 
   /**
    * Returns the carbon emitted in SensorData format for the Source name given over the range of
    * time between startTime and endTime, or null if no carbon data exists.
    * 
-   * @param sourceName The source name.
+   * @param sourceName The name of the source.
    * @param startTime The start of the range requested.
    * @param endTime The start of the range requested.
    * @param interval The sampling interval requested.
@@ -430,7 +815,48 @@ public class DbManager {
    */
   public SensorData getCarbon(String sourceName, XMLGregorianCalendar startTime,
       XMLGregorianCalendar endTime, int interval) {
-    return this.dbImpl.getCarbon(sourceName, startTime, endTime, interval);
+    return this.getCarbon(this.getSource(sourceName), startTime, endTime, interval);
+  }
+
+  /**
+   * Returns the carbon emitted in SensorData format for the Source name given after the startTime,
+   * or null if no carbon data exists.
+   * 
+   * @param sourceName The name of the source.
+   * @param startTime The start of the range requested.
+   * @param interval The sampling interval requested.
+   * @return The requested carbon in SensorData format, or null if it cannot be found/calculated.
+   */
+  public SensorData getCarbon(String sourceName, XMLGregorianCalendar startTime, int interval) {
+    return this.getCarbon(this.getSource(sourceName), startTime, null, interval);
+  }
+
+  /**
+   * Returns the carbon emitted in SensorData format for the Source given over the range of time
+   * between startTime and endTime, or null if no carbon data exists.
+   * 
+   * @param source The source object.
+   * @param startTime The start of the range requested.
+   * @param endTime The start of the range requested.
+   * @param interval The sampling interval requested.
+   * @return The requested carbon in SensorData format, or null if it cannot be found/calculated.
+   */
+  public SensorData getCarbon(Source source, XMLGregorianCalendar startTime,
+      XMLGregorianCalendar endTime, int interval) {
+    return this.dbImpl.getCarbon(source, startTime, endTime, interval);
+  }
+
+  /**
+   * Returns the carbon emitted in SensorData format for the Source given after the startTime, or
+   * null if no carbon data exists.
+   * 
+   * @param source The source object.
+   * @param startTime The start of the range requested.
+   * @param interval The sampling interval requested.
+   * @return The requested carbon in SensorData format, or null if it cannot be found/calculated.
+   */
+  public SensorData getCarbon(Source source, XMLGregorianCalendar startTime, int interval) {
+    return this.getCarbon(source, startTime, null, interval);
   }
 
   /**
@@ -520,8 +946,7 @@ public class DbManager {
   }
 
   /**
-   * Creates a snapshot of the database in the directory specified by
-   * ServerProperties.DB_SNAPSHOT_KEY.
+   * Creates a snapshot of the database in the directory specified by the Server Properties.
    * 
    * @return True if the snapshot succeeded.
    */
@@ -536,6 +961,14 @@ public class DbManager {
    * @return True if data could be wiped, or false if there was a problem wiping data.
    */
   public boolean wipeData() {
+    this.cache.wipeData();
     return this.dbImpl.wipeData();
+  }
+
+  /**
+   * Provides ability to stop or close database connection if necessary.
+   */
+  public void stop() {
+    this.dbImpl.stop();
   }
 }
