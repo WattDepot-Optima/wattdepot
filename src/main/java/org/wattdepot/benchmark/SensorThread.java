@@ -1,4 +1,4 @@
-package org.wattdepot.test;
+package org.wattdepot.benchmark;
 
 import java.util.concurrent.CountDownLatch;
 import org.wattdepot.sensor.MultiThreadedSensor;
@@ -20,6 +20,7 @@ public class SensorThread extends Thread {
   private final CountDownLatch doneSignal;
   /** Hint to the Thread that it should stop. **/
   private static volatile boolean shouldStop = false;
+
   /**
    * Constructor.
    * @param newSensor The sensor to run.

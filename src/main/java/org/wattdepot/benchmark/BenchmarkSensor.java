@@ -1,4 +1,4 @@
-package org.wattdepot.test;
+package org.wattdepot.benchmark;
 
 import java.util.Hashtable;
 import org.wattdepot.datainput.SensorSource;

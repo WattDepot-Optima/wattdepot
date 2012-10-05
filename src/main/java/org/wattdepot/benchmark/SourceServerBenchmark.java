@@ -1,4 +1,4 @@
-package org.wattdepot.test;
+package org.wattdepot.benchmark;
 
 import java.text.NumberFormat;
 import java.util.Hashtable;
@@ -6,6 +6,7 @@ import java.util.concurrent.CountDownLatch;
 import org.wattdepot.client.WattDepotClient;
 import org.wattdepot.datainput.SensorSource;
 import org.wattdepot.resource.source.jaxb.Source;
+import org.wattdepot.server.ServerProperties;
 
 /**
  * Provides a class for Benchmarking the interaction between Sensors/Sources
@@ -16,6 +17,8 @@ import org.wattdepot.resource.source.jaxb.Source;
  */
 
 public final class SourceServerBenchmark extends Thread {
+  /** The path to the server properties file. **/
+  private static final String PROTOCOL = "http://";
   /** Default source URI. **/
   private static String mSourceOwnerUri =
     "http://localhost:8182/wattdepot/users/foo@example.com";
@@ -71,6 +74,15 @@ public final class SourceServerBenchmark extends Thread {
       System.exit(0);
     }
 
+    ServerProperties properties = null;
+    properties = new ServerProperties();
+    mServerURI = PROTOCOL
+      + properties.get("wattdepot-server.hostname") + ":"
+      + properties.get("wattdepot-server.port") + "/"
+      + properties.get("wattdepot-server.context.root") + "/";
+
+    mServerUser = properties.get("wattdepot-server.admin.email");
+    mServerPwd = properties.get("wattdepot-server.admin.password");
     client = new WattDepotClient(mServerURI, mServerUser, mServerPwd);
     healthCheck();
     CountDownLatch startSignal = new CountDownLatch(1);
@@ -112,10 +124,11 @@ public final class SourceServerBenchmark extends Thread {
     NumberFormat nf = NumberFormat.getInstance();
     nf.setMaximumFractionDigits(0);
 
-    System.out.println("Result:\n" + "Execution Time: " + nf.format(ttl)
-        + "ms");
+    System.out.println("Result:\n-------\n" + "Execution Time: "
+        + nf.format(ttl) + "ms");
     System.out.println("Total Requests: " + nf.format(requests));
-    System.out.println("Errors: " + nf.format(errors) + "(");
+    System.out.print("Errors: " + nf.format(errors)
+        + "(");
     System.out.printf("%1$.2f", errors / (requests + errors) * HUNDRED);
     System.out.print("%)");
     //kills lingering HTTP requests
