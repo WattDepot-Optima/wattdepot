@@ -1,4 +1,4 @@
-package org.wattdepot.benchmark.stress;
+package org.wattdepot.benchmark;
 import static org.wattdepot.server.ServerProperties.DB_IMPL_KEY;
 import java.util.Date;
 import java.util.Random;
@@ -13,51 +13,65 @@ import org.wattdepot.server.db.DbManager;
 import org.wattdepot.util.tstamp.Tstamp;
 
 /**
- * Stress test for loading and retrieving data from WattDepot. This is implemented as a JUnit test
+ * Stress test for loading and retrieving data from WattDepot.
+ * This is implemented as a JUnit test
  * so that it can be run in Eclipse.
- * 
  * @author George Lee
  */
 @SuppressWarnings("PMD.JUnitTestsShouldIncludeAssert")
 
-public class DbStress extends DbStressTestHelper{
+public class DbStress extends DbStressTestHelper {
 
+    /** Amount of data to store. **/
     private static final long DATA_AMOUNT = 100000;
+    /** Time between data.**/
     private static final long DATA_INTERVAL = 15000;
-    private static final long startDate = new Date().getTime();
+    /** Starting date for data. **/
+    private static final long START_DATE = new Date().getTime();
+    /** Source name.  **/
     private static final String TEST_SOURCE_NAME = "hale-test";
+    /** Iteration count. **/
     private static final long TEST_ITERATIONS = 1000;
+    /** Convert s to ms.  **/
+    private static final long S_TO_MS = 60000;
+    /** Convert mins to days.  **/
+    private static final long MINS_IN_DAY = 60 * 24;
 
     /**
-     * Sets up the server and inserts data into the current database implementation.
-     * 
+     * Sets up the server and inserts data into the current database
+     * implementation.
      * @throws Exception if there is an error setting the server up.
      */
     @Before
-    public void initializeServer() throws Exception {
-      DbStress.server = Server.newTestInstance();
-      DbStress.manager =
-          new DbManager(server, server.getServerProperties().get(DB_IMPL_KEY), true);
+    public final void initializeServer() throws Exception {
+      Server server = DbStress.getServer();
+      server = Server.newTestInstance();
+      DbManager manager = DbStress.getDBM();
+      manager =
+          new DbManager(server, server.getServerProperties().get(DB_IMPL_KEY),
+              true);
       // Initialize test source(s).
       User user = makeTestUser("test@test.org");
-      DbStress.manager.storeUser(user);
-      final Source source = createTestSource(TEST_SOURCE_NAME, user, true, false);
-      DbStress.manager.storeSource(source);
-      
+      manager.storeUser(user);
+      final Source source = createTestSource(TEST_SOURCE_NAME, user,
+         true, false);
+      manager.storeSource(source);
       SensorData testData;
 
       // Insert data serially
       Date testStart = new Date();
       for (int i = 0; i < DATA_AMOUNT; i++) {
         testData =
-            createSensorData(Tstamp.makeTimestamp(DbStress.startDate + (i * DATA_INTERVAL)),
+            createSensorData(Tstamp.makeTimestamp(DbStress.START_DATE
+                + (i * DATA_INTERVAL)),
                 source);
-        DbStress.manager.storeSensorDataNoCache(testData);
+        manager.storeSensorDataNoCache(testData);
       }
 
       Date testEnd = new Date();
       double msElapsed = testEnd.getTime() - testStart.getTime();
-      System.out.format("Time to insert %d rows serially: %.1f ms%n", DATA_AMOUNT / 2, msElapsed);
+      System.out.format("Time to insert %d rows serially: %.1f ms%n",
+          DATA_AMOUNT / 2, msElapsed);
     }
 
     /**
@@ -65,7 +79,8 @@ public class DbStress extends DbStressTestHelper{
      */
     @Override
     @Test
-    public void testRandomRetrieval() {
+    public final void testRandomRetrieval() {
+      DbManager manager = DbStress.getDBM();
       Random random = new Random();
       long offset = 0;
       Date testStart = new Date();
@@ -73,44 +88,50 @@ public class DbStress extends DbStressTestHelper{
       for (int i = 0; i < TEST_ITERATIONS; i++) {
         offset = (random.nextLong() * DATA_INTERVAL) % DATA_AMOUNT;
         manager
-            .getSensorData(TEST_SOURCE_NAME, Tstamp.makeTimestamp(DbStress.startDate + offset));
+            .getSensorData(TEST_SOURCE_NAME, Tstamp.makeTimestamp(
+                DbStress.START_DATE + offset));
       }
       Date testEnd = new Date();
       double msElapsed = testEnd.getTime() - testStart.getTime();
-      System.out.format("Time to randomly query the database %d times: %.1f ms%n", TEST_ITERATIONS,
-          msElapsed);
+      System.out.print("Time to randomly query the database");
+      System.out.format(" %d times: %.1f ms%n",
+          TEST_ITERATIONS, msElapsed);
     }
-    
+
     /**
      * Randomly retrieves a day's worth of information from WattDepot.
-     * 
-     * @throws DbBadIntervalException if an invalid interval is specified (should not happen).
+     * @throws DbBadIntervalException if an invalid interval is
+     * specified (should not happen).
      */
     @Override
     @Test
-    public void testRandomDailyIndexes() throws DbBadIntervalException {
+    public final void testRandomDailyIndexes() throws DbBadIntervalException {
       Random random = new Random();
       long startOffset = 0;
-      long timePeriod = (60000 / DATA_INTERVAL) * 60 * 24; // Day's worth of data.
+      // Day's worth of data.
+      long timePeriod = (S_TO_MS / DATA_INTERVAL) * MINS_IN_DAY;
 
       Date testStart = new Date();
       random.setSeed(testStart.getTime());
+      DbManager  manager = DbStress.getDBM();
       for (int i = 0; i < TEST_ITERATIONS; i++) {
         startOffset = (random.nextLong() * DATA_INTERVAL) % DATA_AMOUNT;
         if (startOffset < timePeriod) {
-          manager.getSensorDataIndex(TEST_SOURCE_NAME, Tstamp.makeTimestamp(startOffset),
-              Tstamp.makeTimestamp(startOffset + timePeriod));
-        }
-        else {
           manager.getSensorDataIndex(TEST_SOURCE_NAME,
-              Tstamp.makeTimestamp(startOffset - timePeriod), Tstamp.makeTimestamp(startOffset));
+              Tstamp.makeTimestamp(startOffset),
+              Tstamp.makeTimestamp(startOffset + timePeriod));
+        } else {
+          manager.getSensorDataIndex(TEST_SOURCE_NAME,
+              Tstamp.makeTimestamp(startOffset - timePeriod),
+              Tstamp.makeTimestamp(startOffset));
         }
       }
 
       Date testEnd = new Date();
       double msElapsed = testEnd.getTime() - testStart.getTime();
+      System.out.print("Time to randomly retrieve indexes of size");
       System.out.format(
-          "Time to randomly retrieve indexes of size %d from the database %d times: %.1f ms%n",
+          " %d from the database %d times: %.1f ms%n",
           timePeriod, TEST_ITERATIONS, msElapsed);
     }
   }
