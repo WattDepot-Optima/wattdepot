@@ -20,27 +20,6 @@ public abstract class DbStressTestHelper {
   /** **/
   private static DbManager manager;
 
-  /**
-   * Initialize the server for the stress test.
-   * Must be implemented by subclasses.
-   * @throws Exception if there is an error setting the server up.
-   */
-  public abstract void initializeServer() throws Exception;
-
-  /**
-   * Randomly retrieves a row of data from the database.
-   * Must be implemented by subclasses.
-   * @throws Exception if there are issues.
-   */
-  public abstract void testRandomRetrieval() throws Exception;
-
-  /**
-   * Randomly retrieves a day's worth of information from WattDepot.
-   * Must be implemented by
-   * subclasses.
-   * @throws Exception if there are issues.
-   */
-  public abstract void testRandomDailyIndexes() throws Exception;
 
   /**
    * Helper to generate test sensor data for the stress test.
@@ -90,15 +69,15 @@ public abstract class DbStressTestHelper {
    * Returns the DbManager.
    * @return the DbManager.
    */
-  public final static DbManager getDBM() {
+  public static final DbManager getDBM() {
     return manager;
   }
-  
+
   /**
    * Returns the Server object.
-   * @return The Server Object.
+   * @return the Server object.
    */
-  public final static Server getServer() {
+  public static final Server getServer() {
     return server;
   }
 }

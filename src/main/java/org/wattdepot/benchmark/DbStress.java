@@ -2,8 +2,6 @@ package org.wattdepot.benchmark;
 import static org.wattdepot.server.ServerProperties.DB_IMPL_KEY;
 import java.util.Date;
 import java.util.Random;
-import org.junit.Before;
-import org.junit.Test;
 import org.wattdepot.resource.sensordata.jaxb.SensorData;
 import org.wattdepot.resource.source.jaxb.Source;
 import org.wattdepot.resource.user.jaxb.User;
@@ -14,11 +12,13 @@ import org.wattdepot.util.tstamp.Tstamp;
 
 /**
  * Stress test for loading and retrieving data from WattDepot.
- * This is implemented as a JUnit test
  * so that it can be run in Eclipse.
  * @author George Lee
+
+ * Modified to run as non Junit Tests.
+ * @author Jordan Do
+ * @author Greg Burgess
  */
-@SuppressWarnings("PMD.JUnitTestsShouldIncludeAssert")
 
 public class DbStress extends DbStressTestHelper {
 
@@ -40,10 +40,10 @@ public class DbStress extends DbStressTestHelper {
     /**
      * Sets up the server and inserts data into the current database
      * implementation.
+     * @param args Command line args.
      * @throws Exception if there is an error setting the server up.
      */
-    @Before
-    public final void initializeServer() throws Exception {
+    public static void main(final String[] args) throws Exception {
       Server server = DbStress.getServer();
       server = Server.newTestInstance();
       DbManager manager = DbStress.getDBM();
@@ -72,15 +72,16 @@ public class DbStress extends DbStressTestHelper {
       double msElapsed = testEnd.getTime() - testStart.getTime();
       System.out.format("Time to insert %d rows serially: %.1f ms%n",
           DATA_AMOUNT / 2, msElapsed);
+
+      randomRetrieval(manager);
+      randomDailyIndexes(manager);
     }
 
     /**
      * Randomly retrieves a row of data from the database.
+     * @param manager The DBM to use.
      */
-    @Override
-    @Test
-    public final void testRandomRetrieval() {
-      DbManager manager = DbStress.getDBM();
+    public static final void randomRetrieval(final DbManager manager) {
       Random random = new Random();
       long offset = 0;
       Date testStart = new Date();
@@ -100,12 +101,13 @@ public class DbStress extends DbStressTestHelper {
 
     /**
      * Randomly retrieves a day's worth of information from WattDepot.
+     * @param manager The DBM to use.
      * @throws DbBadIntervalException if an invalid interval is
      * specified (should not happen).
      */
-    @Override
-    @Test
-    public final void testRandomDailyIndexes() throws DbBadIntervalException {
+    public static final void randomDailyIndexes(final DbManager manager)
+      throws DbBadIntervalException {
+
       Random random = new Random();
       long startOffset = 0;
       // Day's worth of data.
@@ -113,7 +115,6 @@ public class DbStress extends DbStressTestHelper {
 
       Date testStart = new Date();
       random.setSeed(testStart.getTime());
-      DbManager  manager = DbStress.getDBM();
       for (int i = 0; i < TEST_ITERATIONS; i++) {
         startOffset = (random.nextLong() * DATA_INTERVAL) % DATA_AMOUNT;
         if (startOffset < timePeriod) {
