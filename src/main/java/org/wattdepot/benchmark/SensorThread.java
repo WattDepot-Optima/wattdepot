@@ -46,7 +46,8 @@ public class SensorThread extends Thread {
       while (!shouldStop) {
         sensor.run();
       }
-    } catch (InterruptedException e) {
+    }
+    catch (InterruptedException e) {
       System.out.println("Thread " + this.sensor + " has been interrupted");
     }
      doneSignal.countDown();

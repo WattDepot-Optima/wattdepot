@@ -53,7 +53,8 @@ public class BenchmarkSensor extends HammerSensor {
         synchronized (monitor) {
           requestCount++;
         }
-      } catch (Exception e) {
+      }
+      catch (Exception e) {
         System.err
             .format(
                 "%s: Unable to store sensor data from %s due to exception "

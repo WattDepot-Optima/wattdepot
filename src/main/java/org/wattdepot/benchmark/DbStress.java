@@ -121,7 +121,8 @@ public class DbStress extends DbStressTestHelper {
           manager.getSensorDataIndex(TEST_SOURCE_NAME,
               Tstamp.makeTimestamp(startOffset),
               Tstamp.makeTimestamp(startOffset + timePeriod));
-        } else {
+        }
+        else {
           manager.getSensorDataIndex(TEST_SOURCE_NAME,
               Tstamp.makeTimestamp(startOffset - timePeriod),
               Tstamp.makeTimestamp(startOffset));

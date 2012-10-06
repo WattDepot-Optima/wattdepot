@@ -64,7 +64,8 @@ public final class SourceServerBenchmark extends Thread {
     try {
       numThreads = Integer.parseInt(args[0]);
       ttl = Long.parseLong(args[1]);
-    } catch (NumberFormatException e) {
+    }
+    catch (NumberFormatException e) {
         System.out.println(ARG_ERROR_MSG);
         System.exit(0);
     }
@@ -108,7 +109,8 @@ public final class SourceServerBenchmark extends Thread {
     //START THE CLOCK!
     try {
       sleep(ttl);
-    } catch (InterruptedException e) {
+    }
+    catch (InterruptedException e) {
       System.err.println("ERROR: Benchmark Thread Interupted.");
     }
     //Send a hint to the threads that they
@@ -152,7 +154,8 @@ public final class SourceServerBenchmark extends Thread {
           null, // no additional props
           null), // no sub source
        true);
-    } catch (Exception e) {
+    }
+    catch (Exception e) {
         System.out.println("Unable to store source " + mSourceName
             + index + ". Exception is " + e);
     }
