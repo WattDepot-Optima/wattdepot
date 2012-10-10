@@ -180,7 +180,7 @@ public class UserBenchmark {
       System.out.println("Response time(ms) for a long time ago (uncached): "
           + singlePointUncachedTime / dataSetSize + " ms\n");
       System.out.println("Response time(ms) of resource request"
-      		+ "for 30 data points: "
+          + "for 30 data points: "
           + resourceDataTime / dataSetSize + " ms\n");
       server.shutdown();
       System.out.println("Response time(ms) of aggregate request"

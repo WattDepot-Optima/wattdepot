@@ -1,6 +1,5 @@
 package org.wattdepot.benchmark;
 
-import java.io.PrintStream;
 import java.text.NumberFormat;
 import java.util.Hashtable;
 import java.util.concurrent.CountDownLatch;
@@ -176,7 +175,8 @@ public final class SourceServerBenchmark extends Thread {
   public static void healthCheck() {
       if (client.isHealthy()) {
         System.out.println("WattDepot server found.");
-      } else {
+      }
+      else {
         System.out.println("WattDepot server NOT found.");
         System.out.println("This may be due to a bad URI,"
            + " or the server not being active.");
