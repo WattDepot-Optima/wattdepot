@@ -1,11 +1,13 @@
 package org.wattdepot.benchmark;
 
+import java.io.PrintStream;
 import java.text.NumberFormat;
 import java.util.Hashtable;
 import java.util.concurrent.CountDownLatch;
 import org.wattdepot.client.WattDepotClient;
 import org.wattdepot.datainput.SensorSource;
 import org.wattdepot.resource.source.jaxb.Source;
+import org.wattdepot.server.Server;
 import org.wattdepot.server.ServerProperties;
 
 /**
@@ -53,10 +55,12 @@ public final class SourceServerBenchmark extends Thread {
  * Executes the benchmark.
  * @param args Command line arguments of the form
  *    <number of sensors to run> <time to run in ms>.
- * @throws InterruptedException If the thread is interrupted while sleeping.
+ * @throws Exception If something goes wrong with initializing
+ *                     the server.
  */
-  public static void main(final String[] args) throws InterruptedException {
-    //parse commandline args
+  public static void main(final String[] args) throws Exception {
+    Server server = Server.newInstance();
+    //parse command line args
     if (args.length < 2) {
       System.out.println(ARG_ERROR_MSG);
       System.exit(0);
@@ -67,11 +71,13 @@ public final class SourceServerBenchmark extends Thread {
     }
     catch (NumberFormatException e) {
         System.out.println(ARG_ERROR_MSG);
+        server.shutdown();
         System.exit(0);
     }
 
     if (!(numThreads > 0 && ttl > 0)) {
       System.out.println(ARG_ERROR_MSG);
+      server.shutdown();
       System.exit(0);
     }
 
@@ -103,7 +109,7 @@ public final class SourceServerBenchmark extends Thread {
       threads[i] = new SensorThread(startSignal, doneSignal, benches[i]);
       threads[i].start();
     }
-    System.out.println("Done creating threads... \nStarting threads...");
+    System.out.println("Starting threads...");
     startSignal.countDown();
 
     //START THE CLOCK!
@@ -117,10 +123,12 @@ public final class SourceServerBenchmark extends Thread {
     //should stop running
     System.out.println("Stopping Threads...");
     SensorThread.halt();
-    //Wait for threads to comply
-    //doneSignal.await();
-
+    //take a snapshot of the result at the deadline
     Hashtable<String, Long> result = BenchmarkSensor.getResults();
+    //Wait for threads to comply
+    //unnecessary, but good practice...
+    doneSignal.await();
+
     double requests = result.get("requestCount");
     double errors = result.get("errorCount");
     NumberFormat nf = NumberFormat.getInstance();
@@ -130,10 +138,11 @@ public final class SourceServerBenchmark extends Thread {
         + nf.format(ttl) + "ms");
     System.out.println("Total Requests: " + nf.format(requests));
     System.out.print("Errors: " + nf.format(errors)
-        + "(");
+        + " (");
     System.out.printf("%1$.2f", errors / (requests + errors) * HUNDRED);
-    System.out.print("%)");
-    //kills lingering HTTP requests
+    System.out.print("%)\n");
+    //Shutdown server
+    server.shutdown();
     System.exit(0);
   }
 
@@ -168,7 +177,9 @@ public final class SourceServerBenchmark extends Thread {
       if (client.isHealthy()) {
         System.out.println("WattDepot server found.");
       } else {
-        System.out.println("WattDepot server NOT found. Exiting...");
+        System.out.println("WattDepot server NOT found.");
+        System.out.println("This may be due to a bad URI,"
+           + " or the server not being active.");
         System.exit(-1);
       }
   }

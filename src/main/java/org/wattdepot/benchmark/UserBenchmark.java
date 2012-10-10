@@ -1,110 +1,190 @@
 package org.wattdepot.benchmark;
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
-import java.net.*;
-import java.io.*;
 
-import javax.xml.datatype.XMLGregorianCalendar;
-
+import static org.wattdepot.server.ServerProperties.ADMIN_EMAIL_KEY;
+import java.net.ConnectException;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import org.wattdepot.server.Server;
+import org.wattdepot.server.ServerProperties;
+import org.wattdepot.server.db.DbManager;
+import org.wattdepot.test.DataGenerator;
 import org.wattdepot.util.tstamp.Tstamp;
 
+/**
+ * Provides a benchmarking tool for measuring the response times for the
+ * user-side URI interface to the WattDepot Server.  Measures the response time
+ * in milliseconds for serialized requests covering: single point data,
+ * aggregate data, and aggregate resource data.
+ *
+ * @author Keone Hirade
+ * @author Greg Burgess
+ *
+ */
 public class UserBenchmark {
+    /** Set HTTP timeout cutoff to 10s.  **/
+    public static final int HTTP_TIMEOUT = 10000;
+    /** The path to the server properties file. **/
+    private static final String PROTOCOL = "http://";
+    /** Default Wattdepot server URI. **/
+    private static String mServerURI =
+      "http://localhost:8182/wattdepot/sources/";
+    /** A day represented as ms. **/
+    private static final long DAY_TO_MS = 7 * 3600 * 1000;
+    /** Two Minutes represented as ms.  **/
+    private static final long TEN_MINS_IN_MS = 10 * 60 * 1000;
+    /** Thirty Minutes represented as ms.  **/
+    private static final long THIRTY_MINS_IN_MS = 30 * 60 * 1000;
+    /** Number of times to run the test.  **/
+    private static double dataSetSize = 1;
+    /** Default name of the sensor to be used. **/
+    private static String sensorName = "source01";
+    /** Error message for bad command line invocation. **/
+    private static final String ARG_ERROR_MSG = "Usage is: "
+        + "<Number of times to run test (integer > 0)> ";
+    /**
+     * Executes an HTTP GET request on a given url, returning
+     * the response time in milliseconds if successful, -1
+     * otherwise.
+     *
+     * @param url The URL to point the GET request at.
+     * @return How long the request took in milliseconds
+     * @throws Exception If something went wrong while executing.
+     */
+    public final long getRequest(final String url) throws Exception {
+        HttpURLConnection connection = null;
+        URL serverAddress = null;
+        long startTime = 0;
+        long endTime = 0;
+        long elapsedTime = 0;
+        int responseCode = 0;
+        serverAddress = new URL(url);
+        //set up out connection
+        connection = null;
+        //Set up the initial connection
+        startTime = System.currentTimeMillis();
+        connection =
+        (HttpURLConnection) serverAddress.openConnection();
+        serverAddress.openConnection();
+        connection.setRequestMethod("GET");
+        connection.setDoOutput(true);
+        connection.setReadTimeout(HTTP_TIMEOUT);
+        connection.connect();
+        responseCode = connection.getResponseCode();
+        if (responseCode != 200) {
+          System.err.println("Encountered error: HTTP"
+              + connection.getResponseCode());
+          System.exit(0);
+        }
+        endTime = System.currentTimeMillis();
+        elapsedTime = endTime - startTime;
+        //close the connection, set all objects to null
+        connection.disconnect();
+        connection = null;
+        return elapsedTime;
+    }
 
-	public long getRequest(String url) {
-		  HttpURLConnection connection = null;
-	      OutputStreamWriter wr = null;
-	      BufferedReader rd  = null;
-	      StringBuilder sb = null;
-	      String line = null;
-	      URL serverAddress = null;
-	      long startTime = 0;
-	      long endTime = 0;
-	      long elapsedTime = 0;
-	      long timestamp;
-	      //timestamp = System.currentTimeMillis();
-	  //timestamp = timestamp - 120000;
-	  //XMLGregorianCalendar calender = Tstamp.makeTimestamp(timestamp);
+    /**
+     * Executes the benchmark.
+     * @param args command line args.
+     * @throws Exception If there's a problem starting the server.
+     */
+    public static void main(final String[] args) throws Exception {
+
+    //parse command line args
+      if (args.length < 1) {
+        System.out.println(ARG_ERROR_MSG);
+        System.exit(0);
+      }
+      try {
+        dataSetSize = Integer.parseInt(args[0]);
+      }
+      catch (NumberFormatException e) {
+          System.out.println(ARG_ERROR_MSG);
+          System.exit(0);
+      }
+
+      //Build Server URI
+      ServerProperties properties = null;
+      properties = new ServerProperties();
+      mServerURI = PROTOCOL
+        + properties.get("wattdepot-server.hostname") + ":"
+        + properties.get("wattdepot-server.port") + "/"
+        + properties.get("wattdepot-server.context.root")
+        + "/sources/";
+
+      //Check for active servers before we start ours
+      UserBenchmark bench = new UserBenchmark();
+      try {
+        bench.getRequest(mServerURI);
+        System.err.println("Active server detected."
+            + "  Please close all instances of WattDepotServer");
+         System.exit(1);
+      }
+      catch (ConnectException e) {
+        System.out.println("Checking For Open Servers...");
+      }
+
+      Server server = Server.newInstance();
+      String adminEmail = server.getServerProperties().get(ADMIN_EMAIL_KEY);
+      DbManager dbManager = (DbManager) server.getContext()
+        .getAttributes().get("DbManager");
+      String adminUserUri = dbManager.getUser(adminEmail).toUri(server);
+      DataGenerator test = new DataGenerator(dbManager, adminUserUri, server);
+
+      long startTime = System.currentTimeMillis();
+      //long twoMinsAgo = startTime - TWO_MINS_IN_MS;
+      long endTime = startTime - DAY_TO_MS;
+      System.out.println("Storing data...");
+      test.storeData(Tstamp.makeTimestamp(endTime), Tstamp
+          .makeTimestamp(startTime), 1);
 
 
-	      try {
-	          serverAddress = new URL(url);
-			  //set up out communications stuff
-			  connection = null;
-			  //Set up the initial connection
-			  startTime = System.currentTimeMillis();
-			  connection =
-			    (HttpURLConnection)serverAddress.openConnection();
-			  URLConnection yc = serverAddress.openConnection();
-			  connection.setRequestMethod("GET");
-			  connection.setDoOutput(true);
-			  connection.setReadTimeout(10000);
-			  connection.connect();
+      //Extend the uri to include a sensor name
+      mServerURI += sensorName;
+      long singlePointCachedTime = 0;
+      long singlePointUncachedTime = 0;
+      long aggDataTime = 0;
+      long resourceDataTime = 0;
 
-			  //get the output stream writer and write the output to the server
-			  //not needed in this example
-			  //wr = new OutputStreamWriter(connection.getOutputStream());
-			  //wr.write("");
-			  //wr.flush();
-			  //System.out.println("we're here 6.5");
+      for (int i = 0; i < dataSetSize; i++) {
+          //Single point cached response time
+          singlePointCachedTime += bench.getRequest(mServerURI
+              + "/sensordata/" + Tstamp.makeTimestamp(startTime - 60000));
+          
+          //Single point uncached response time
+          singlePointUncachedTime = bench.getRequest(mServerURI
+              + "/sensordata/" + Tstamp.makeTimestamp(endTime));
 
 
-			  //read the result from the server
-			 // rd  = new BufferedReader(new InputStreamReader(connection.getInputStream()));
-			  //sb = new StringBuilder();
+          //Aggregate data rsponse time
+          aggDataTime = bench.getRequest(mServerURI
+              + "/carbon/?"
+              + "startTime=" + Tstamp.makeTimestamp(startTime
+                  - THIRTY_MINS_IN_MS)
+              + "&endTime=" + Tstamp.makeTimestamp(startTime
+                  - THIRTY_MINS_IN_MS + TEN_MINS_IN_MS));
 
-			 // while ((line = rd.readLine()) != null)
-			  //{
-			  //    sb.append(line + '\n');
-			  //}
-			  System.out.println("response code is: "
-			      + connection.getResponseCode());
-			  endTime = System.currentTimeMillis();
-			  elapsedTime = endTime - startTime;
 
-			  //System.out.println(sb.toString());
+          //Resource data response time
+          resourceDataTime = bench.getRequest(mServerURI
+              + "/sensordata/?"
+              + "startTime=" + Tstamp.makeTimestamp(startTime
+                  - THIRTY_MINS_IN_MS)
+              + "&endTime=" + Tstamp.makeTimestamp(startTime
+                  - THIRTY_MINS_IN_MS + TEN_MINS_IN_MS));
+      }
 
-			  }
-	      catch (MalformedURLException e) {
-			      e.printStackTrace();
-			  }
-	      catch (ProtocolException e) {
-			      e.printStackTrace();
-			  }
-	      catch (IOException e) {
-			      e.printStackTrace();
-			  }
-			  finally {
-			      //close the connection, set all objects to null
-			          connection.disconnect();
-			          rd = null;
-			          sb = null;
-			          wr = null;
-			          connection = null;
-		      }
-			  return elapsedTime;
-		}
 
-	  public static void main(String[] args) {
-		  long responseTime = 0;
-		  UserBenchmark bench = new UserBenchmark();
-		  responseTime = bench.getRequest("http://localhost:8182/wattdepot/sources/source01/sensordata/2012-09-27T22:00:00.000-10:00");
-		  System.out.println("Response time(ms) for the last 2 minutes: " + responseTime + " ms\n");
-
-		  responseTime = bench.getRequest("http://localhost:8182/wattdepot/sources/source01/sensordata/2010-01-08T00:20:00.000-10:00");
-		  System.out.println("Response time(ms) for a long time ago: " + responseTime + " ms\n");
-
-		  responseTime = bench.getRequest("http://localhost:8182/wattdepot/sources/source01/sensordata/?startTime=2012-09-27T23:56:00.000-10:00&endTime=2012-09-27T23:58:00.000-10:00");
-		  System.out.println("Response time(ms) of aggregate request for 2 minutes worth of data(cached): " + responseTime + " ms\n");
-
-		  responseTime = bench.getRequest("http://localhost:8182/wattdepot/sources/source01/carbon/?startTime=2012-09-27T23:56:00.000-10:00&endTime=2012-09-27T23:58:00.000-10:00");
-		  System.out.println("Response time(ms) for resource request(cached): " + responseTime + " ms\n");
-
-		  responseTime = bench.getRequest("http://localhost:8182/wattdepot/sources/source01/sensordata/?startTime=2012-09-27T23:30:00.000-10:00&endTime=2012-09-27T23:32:00.000-10:00");
-		  System.out.println("Response time(ms) of aggregate request for 10 minutes worth of data(uncached): " + responseTime + " ms\n");
-
-		  responseTime = bench.getRequest("http://localhost:8182/wattdepot/sources/source01/carbon/?startTime=2012-09-27T23:30:00.000-10:00&endTime=2012-09-27T23:32:00.000-10:00");
-		  System.out.println("Response time(ms) for resource request(uncached): " + responseTime + " ms\n");
-	  }
+      System.out.println("Response time(ms) for point data (cached): "
+          + singlePointCachedTime / dataSetSize + " ms\n");
+      System.out.println("Response time(ms) for a long time ago (uncached): "
+          + singlePointUncachedTime / dataSetSize + " ms\n");
+      System.out.println("Response time(ms) of resource request"
+      		+ "for 30 data points: "
+          + resourceDataTime / dataSetSize + " ms\n");
+      server.shutdown();
+      System.out.println("Response time(ms) of aggregate request"
+          + " for 30 data points: "
+          + aggDataTime / dataSetSize + " ms\n");
+    }
 }
