@@ -1,5 +1,7 @@
 package org.wattdepot.benchmark;
 
+import java.io.BufferedWriter;
+import java.io.FileWriter;
 import java.text.NumberFormat;
 import java.util.Hashtable;
 import java.util.concurrent.CountDownLatch;
@@ -132,17 +134,35 @@ public final class SourceServerBenchmark extends Thread {
     double errors = result.get("errorCount");
     NumberFormat nf = NumberFormat.getInstance();
     nf.setMaximumFractionDigits(0);
-
-    System.out.println("Result:\n-------\n" + "Execution Time: "
-        + nf.format(ttl) + "ms");
-    System.out.println("Total Requests: " + nf.format(requests));
-    System.out.print("Errors: " + nf.format(errors)
+    String toReturn = "";
+    toReturn += "Result:\n-------\n" + "Execution Time: "
+        + nf.format(ttl) + "ms\n";
+    toReturn += "Successful Requests: " + nf.format(requests)
+        + "\n";
+    toReturn += String.format("Errors: " + nf.format(errors)
         + " (");
-    System.out.printf("%1$.2f", errors / (requests + errors) * HUNDRED);
-    System.out.print("%)\n");
+    toReturn += String.format("%1$.2f", errors
+        / (requests + errors) * HUNDRED);
+    toReturn += "%)\n";
     //Shutdown server
     server.shutdown();
-    System.exit(0);
+    System.out.println(toReturn);
+
+    try {
+      System.out.println("Writing output to "
+          + System.getProperty("user.home"));
+      FileWriter fstream = new FileWriter(
+          System.getProperty("user.home") + "\\SourceServerBench.txt");
+      BufferedWriter out = new BufferedWriter(fstream);
+      out.write("Sensor/Source benchmark");
+      out.newLine();
+      out.write(toReturn);
+      out.newLine();
+      out.close();
+      }
+    catch (Exception e) {
+      System.err.println("Error: " + e.getMessage());
+      }
   }
 
   /** Registers a source with the WDServer using the mSourceName and an index.

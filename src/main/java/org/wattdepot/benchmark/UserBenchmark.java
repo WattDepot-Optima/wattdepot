@@ -1,6 +1,8 @@
 package org.wattdepot.benchmark;
 
 import static org.wattdepot.server.ServerProperties.ADMIN_EMAIL_KEY;
+import java.io.BufferedWriter;
+import java.io.FileWriter;
 import java.net.ConnectException;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -150,7 +152,7 @@ public class UserBenchmark {
           //Single point cached response time
           singlePointCachedTime += bench.getRequest(mServerURI
               + "/sensordata/" + Tstamp.makeTimestamp(startTime - 60000));
-          
+
           //Single point uncached response time
           singlePointUncachedTime = bench.getRequest(mServerURI
               + "/sensordata/" + Tstamp.makeTimestamp(endTime));
@@ -174,17 +176,35 @@ public class UserBenchmark {
                   - THIRTY_MINS_IN_MS + TEN_MINS_IN_MS));
       }
 
-
-      System.out.println("Response time(ms) for point data (cached): "
-          + singlePointCachedTime / dataSetSize + " ms\n");
-      System.out.println("Response time(ms) for a long time ago (uncached): "
-          + singlePointUncachedTime / dataSetSize + " ms\n");
-      System.out.println("Response time(ms) of resource request"
-          + "for 30 data points: "
-          + resourceDataTime / dataSetSize + " ms\n");
       server.shutdown();
-      System.out.println("Response time(ms) of aggregate request"
+
+      String toReturn = "";
+      toReturn += "Response time(ms) for point data (cached): "
+          + singlePointCachedTime / dataSetSize + " ms\n";
+      toReturn += "Response time(ms) for a long time ago (uncached): "
+          + singlePointUncachedTime / dataSetSize + " ms\n";
+      toReturn += "Response time(ms) of resource request"
+          + "for 30 data points: "
+          + resourceDataTime / dataSetSize + " ms\n";
+      toReturn += "Response time(ms) of aggregate request"
           + " for 30 data points: "
-          + aggDataTime / dataSetSize + " ms\n");
+          + aggDataTime / dataSetSize + " ms\n";
+
+      System.out.println(toReturn);
+      try {
+        System.out.println("Writing output to "
+            + System.getProperty("user.home"));
+        FileWriter fstream = new FileWriter(
+            System.getProperty("user.home") + "\\userBench.txt");
+        BufferedWriter out = new BufferedWriter(fstream);
+        out.write("Sensor/Source benchmark");
+        out.newLine();
+        out.write(toReturn);
+        out.newLine();
+        out.close();
+        }
+      catch (Exception e) {
+        System.err.println("Error: " + e.getMessage());
+        }
     }
 }

@@ -104,12 +104,15 @@ public class DbStress extends DbStressTestHelper {
       System.out.format("Time to insert %d rows serially: %.1f ms%n",
           dataAmmount / 2, msElapsed);
       try {
-        System.out.println("Writing output to " + System.getProperty("user.home"));
-        FileWriter fstream = new FileWriter(System.getProperty("user.home") + "\\output.txt");
+        System.out.println("Writing output to "
+            + System.getProperty("user.home"));
+        FileWriter fstream = new FileWriter(
+            System.getProperty("user.home") + "\\DBBench.txt");
         BufferedWriter out = new BufferedWriter(fstream);
         out.write("Database benchmark");
         out.newLine();
-        out.write("Time to insert " + dataAmmount / 2 + " rows serially: " + .1 * msElapsed + " ms");
+        out.write("Time to insert " + dataAmmount
+            / 2 + " rows serially: " + .1 * msElapsed + " ms");
         out.newLine();
         out.write(randomRetrieval(manager));
         out.newLine();
@@ -119,8 +122,7 @@ public class DbStress extends DbStressTestHelper {
       catch (Exception e) {
         System.err.println("Error: " + e.getMessage());
         }
-      //randomRetrieval(manager);
-      //randomDailyIndexes(manager);
+      getServer().shutdown();
     }
 
     /**
@@ -186,9 +188,8 @@ public class DbStress extends DbStressTestHelper {
       System.out.format(
           " %d b from the database %d times: %.1f ms%n",
           timePeriod, testIterations, msElapsed);
-      getServer().shutdown();
-      String toReturn = "Time to randomly retrieve indexes of size" + 
-          String.format(" %d b from the database %d times: %.1f ms",
+      String toReturn = "Time to randomly retrieve indexes of size"
+        + String.format(" %d b from the database %d times: %.1f ms",
           timePeriod, testIterations, msElapsed);
       return toReturn;
     }
