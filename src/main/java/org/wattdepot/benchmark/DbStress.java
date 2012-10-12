@@ -21,22 +21,27 @@ import org.wattdepot.util.tstamp.Tstamp;
 
 public class DbStress extends DbStressTestHelper {
 
-    /** Amount of data to store. **/
-    private static final long DATA_AMOUNT = 100;
-    /** Time between data.**/
-    private static final long DATA_INTERVAL = 15000;
+    /** Amount of data to store. Def = 100.**/
+    private static long dataAmmount = 0;
+    /** Time between data. Def = 15000.**/
+    private static long dataInterval = 0;
     /** Starting date for data. **/
     private static final long START_DATE = new Date().getTime();
     /** Source name.  **/
     private static final String TEST_SOURCE_NAME = "hale-test";
-    /** Iteration count. **/
-    private static final long TEST_ITERATIONS = 1000;
+    /** Iteration count. Def = 1000.**/
+    private static long testIterations = 0;
     /** Convert s to ms.  **/
     private static final long S_TO_MS = 60000;
     /** Convert mins to days.  **/
     private static final long MINS_IN_DAY = 60 * 24;
     /** The DbManagement object. **/
     private static DbManager manager = null;
+    /** Error message for bad command line invocation. **/
+    private static final String ARG_ERROR_MSG = "Usage is: "
+        + "<Number of Iterations to Run (long > 0)> "
+        + "<Data interval in ms (long > 0)> "
+        + "<Number of peices of data to store (long > 0)>";
 
     /**
      * Sets up the server and inserts data into the current database
@@ -45,6 +50,30 @@ public class DbStress extends DbStressTestHelper {
      * @throws Exception if there is an error setting the server up.
      */
     public static void main(final String[] args) throws Exception {
+      //parse command line args
+      if (args.length < 3) {
+        System.out.println(ARG_ERROR_MSG);
+        System.exit(0);
+      }
+      else {
+        try {
+          testIterations = Integer.parseInt(args[0]);
+          dataInterval = Long.parseLong(args[1]);
+          dataAmmount = Long.parseLong(args[2]);
+        }
+        catch (NumberFormatException e) {
+            System.out.println(ARG_ERROR_MSG);
+            System.exit(0);
+        }
+      }
+
+      if (!(testIterations > 0
+          && dataInterval > 0
+          && dataAmmount > 0)) {
+        System.out.println(ARG_ERROR_MSG);
+        System.exit(0);
+      }
+
       setServer(Server.newTestInstance());
       manager =
           new DbManager(getServer(),
@@ -60,10 +89,10 @@ public class DbStress extends DbStressTestHelper {
 
       // Insert data serially
       Date testStart = new Date();
-      for (int i = 0; i < DATA_AMOUNT; i++) {
+      for (int i = 0; i < dataAmmount; i++) {
         testData =
             createSensorData(Tstamp.makeTimestamp(DbStress.START_DATE
-                + (i * DATA_INTERVAL)),
+                + (i * dataInterval)),
                 source);
         manager.storeSensorDataNoCache(testData);
       }
@@ -71,7 +100,7 @@ public class DbStress extends DbStressTestHelper {
       Date testEnd = new Date();
       double msElapsed = testEnd.getTime() - testStart.getTime();
       System.out.format("Time to insert %d rows serially: %.1f ms%n",
-          DATA_AMOUNT / 2, msElapsed);
+          dataAmmount / 2, msElapsed);
 
       randomRetrieval(manager);
       randomDailyIndexes(manager);
@@ -86,8 +115,8 @@ public class DbStress extends DbStressTestHelper {
       long offset = 0;
       Date testStart = new Date();
       random.setSeed(testStart.getTime());
-      for (int i = 0; i < TEST_ITERATIONS; i++) {
-        offset = (random.nextLong() * DATA_INTERVAL) % DATA_AMOUNT;
+      for (int i = 0; i < testIterations; i++) {
+        offset = (random.nextLong() * dataInterval) % dataAmmount;
         dbm
             .getSensorData(TEST_SOURCE_NAME, Tstamp.makeTimestamp(
                 DbStress.START_DATE + offset));
@@ -96,7 +125,7 @@ public class DbStress extends DbStressTestHelper {
       double msElapsed = testEnd.getTime() - testStart.getTime();
       System.out.print("Time to randomly query the database");
       System.out.format(" %d times: %.1f ms%n",
-          TEST_ITERATIONS, msElapsed);
+          testIterations, msElapsed);
     }
 
     /**
@@ -110,12 +139,12 @@ public class DbStress extends DbStressTestHelper {
       Random random = new Random();
       long startOffset = 0;
       // Day's worth of data.
-      long timePeriod = (S_TO_MS / DATA_INTERVAL) * MINS_IN_DAY;
+      long timePeriod = (S_TO_MS / dataInterval) * MINS_IN_DAY;
 
       Date testStart = new Date();
       random.setSeed(testStart.getTime());
-      for (int i = 0; i < TEST_ITERATIONS; i++) {
-        startOffset = (random.nextLong() * DATA_INTERVAL) % DATA_AMOUNT;
+      for (int i = 0; i < testIterations; i++) {
+        startOffset = (random.nextLong() * dataInterval) % dataAmmount;
         if (startOffset < timePeriod) {
           dbm.getSensorDataIndex(TEST_SOURCE_NAME,
               Tstamp.makeTimestamp(startOffset),
@@ -133,7 +162,7 @@ public class DbStress extends DbStressTestHelper {
       System.out.print("Time to randomly retrieve indexes of size");
       System.out.format(
           " %d b from the database %d times: %.1f ms%n",
-          timePeriod, TEST_ITERATIONS, msElapsed);
+          timePeriod, testIterations, msElapsed);
       getServer().shutdown();
     }
   }
