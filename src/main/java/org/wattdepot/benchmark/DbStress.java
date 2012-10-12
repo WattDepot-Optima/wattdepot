@@ -1,5 +1,7 @@
 package org.wattdepot.benchmark;
 import static org.wattdepot.server.ServerProperties.DB_IMPL_KEY;
+import java.io.BufferedWriter;
+import java.io.FileWriter;
 import java.util.Date;
 import java.util.Random;
 import org.wattdepot.resource.sensordata.jaxb.SensorData;
@@ -101,16 +103,32 @@ public class DbStress extends DbStressTestHelper {
       double msElapsed = testEnd.getTime() - testStart.getTime();
       System.out.format("Time to insert %d rows serially: %.1f ms%n",
           dataAmmount / 2, msElapsed);
-
-      randomRetrieval(manager);
-      randomDailyIndexes(manager);
+      try {
+        System.out.println("Writing output to " + System.getProperty("user.home"));
+        FileWriter fstream = new FileWriter(System.getProperty("user.home") + "\\output.txt");
+        BufferedWriter out = new BufferedWriter(fstream);
+        out.write("Database benchmark");
+        out.newLine();
+        out.write("Time to insert " + dataAmmount / 2 + " rows serially: " + .1 * msElapsed + " ms");
+        out.newLine();
+        out.write(randomRetrieval(manager));
+        out.newLine();
+        out.write(randomDailyIndexes(manager));
+        out.close();
+        }
+      catch (Exception e) {
+        System.err.println("Error: " + e.getMessage());
+        }
+      //randomRetrieval(manager);
+      //randomDailyIndexes(manager);
     }
 
     /**
      * Randomly retrieves a row of data from the database.
      * @param dbm The DBM to use.
+     *      * @return A string containing the result
      */
-    public static final void randomRetrieval(final DbManager dbm) {
+    public static final String randomRetrieval(final DbManager dbm) {
       Random random = new Random();
       long offset = 0;
       Date testStart = new Date();
@@ -126,14 +144,19 @@ public class DbStress extends DbStressTestHelper {
       System.out.print("Time to randomly query the database");
       System.out.format(" %d times: %.1f ms%n",
           testIterations, msElapsed);
+      String toReturn = "Time to randomly query the database" +
+          String.format(" %d times: %.1f ms",
+          testIterations, msElapsed);
+      return toReturn;
     }
 
     /**
      * Randomly retrieves a day's worth of information from WattDepot.
      * @param dbm The DBM to use.
+     * @return A string containing the result
      * @throws Exception If there's an error shutting down the server.
      */
-    public static final void randomDailyIndexes(final DbManager dbm)
+    public static final String randomDailyIndexes(final DbManager dbm)
       throws Exception {
 
       Random random = new Random();
@@ -164,5 +187,9 @@ public class DbStress extends DbStressTestHelper {
           " %d b from the database %d times: %.1f ms%n",
           timePeriod, testIterations, msElapsed);
       getServer().shutdown();
+      String toReturn = "Time to randomly retrieve indexes of size" + 
+          String.format(" %d b from the database %d times: %.1f ms",
+          timePeriod, testIterations, msElapsed);
+      return toReturn;
     }
   }
