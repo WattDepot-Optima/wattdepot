@@ -1,24 +1,19 @@
 package org.wattdepot.benchmark;
 
-import static org.wattdepot.server.ServerProperties.DB_IMPL_KEY;
 import javax.xml.datatype.XMLGregorianCalendar;
-import org.wattdepot.client.WattDepotClient;
 import org.wattdepot.resource.property.jaxb.Property;
 import org.wattdepot.resource.sensordata.jaxb.SensorData;
 import org.wattdepot.resource.source.jaxb.Source;
 import org.wattdepot.resource.user.jaxb.User;
 import org.wattdepot.server.Server;
-import org.wattdepot.server.db.DbManager;
 
 /**
  * Helper class for creating test data to be used in the database stress test.
  * @author George Lee
  */
 public abstract class DbStressTestHelper {
-  /** **/
+  /** Server Object.  **/
   private static Server server;
-  /** **/
-  private static DbManager manager;
 
 
   /**
@@ -66,102 +61,18 @@ public abstract class DbStressTestHelper {
   }
 
   /**
-   * Returns the DbManager.
-   * @return the DbManager.
-   */
-  public static final DbManager getDBM() {
-    return manager;
-  }
-
-  /**
    * Returns the Server object.
    * @return the Server object.
    */
   public static final Server getServer() {
     return server;
   }
-}
-
-/**
- * Wrapper class to quickly instantiate multiple clients.
- * Threads need to override run method to execute.
- * @author George Lee
- *
- */
-class ClientThread extends Thread {
-  /** **/
-  private WattDepotClient client;
-  /** **/
-  private long threadId;
-
 
   /**
-   * Constructor for the client thread.
-   * Instantiates the thread with the server used by the stress test.
-
-  public ClientThread(int id) {
-    this.client =
-        new WattDepotClient(ParallelStressTest.server.getHostName(),
-        ParallelStressTest.adminEmail,
-        ParallelStressTest.adminPassword);
-    this.threadId = id;
-  }
-  */
-
-  /** Returns the client (WattDepotClient).
-   * @return The WattDepotClient.
+   * Allows access to the private server object.
+   * @param newServer the object to set the private server to.
    */
-  public WattDepotClient getClient() {
-    return client;
-  }
-
-  /** Returns the Thread ID.
-   * @return The Thread id
-   */
-  public long getThreadId() {
-    return threadId;
-  }
-}
-
-
-/**
- * Wrapper class to instantiate multiple DbManagers.
- * Threads will need to override run method to execute.
- * @author George Lee
- *
- */
-class ManagerThread extends Thread {
-  /** **/
-  private DbManager manager;
-  /** **/
-  private long id = 0;
-
-  /**
-   * Constructor for the thread.
-   * @param server The server implementation used to set up the thread.
-   * @param idnum This object's id.
-   */
-  ManagerThread(final Server server, final long idnum) {
-    this.manager = new DbManager(server,
-        server.getServerProperties().get(DB_IMPL_KEY), true);
-    this.id = idnum;
-  }
-
-
-  /**
-   * Returns the DbManager.
-   * @return the DbManager.
-   */
-  public DbManager getDBM() {
-    return manager;
-  }
-
-
-  /**
-   * Returns the ID.
-   * @return The thread's ID.
-   */
-  public long getID() {
-    return id;
+  public static final void setServer(final Server newServer) {
+    server = newServer;
   }
 }
