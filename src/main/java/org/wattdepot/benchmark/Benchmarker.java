@@ -1,16 +1,16 @@
 package org.wattdepot.benchmark;
 
-import org.wattdepot.benchmark.DbStress;
-import org.wattdepot.benchmark.SourceServerBenchmark;
-import org.wattdepot.benchmark.UserBenchmark;
-
+/** Executes all the Benchmarks.
+ * Used to run benchmarks from Maven.
+ * @author Greg Burgess
+**/
 public class Benchmarker {
     /**
      * Runs Benchmark classes.
+     * @param args Comand line args.
      * @throws Exception If something goes wrong.
      */
-
-    public static void main(String[] args) throws Exception {
+    public static void main(final String[] args) throws Exception {
       String[] toSend = {"100"};
       UserBenchmark.main(toSend);
       toSend = new String[] {"100", "10000"};
