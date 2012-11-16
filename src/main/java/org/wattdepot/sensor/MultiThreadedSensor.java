@@ -44,7 +44,6 @@ public abstract class MultiThreadedSensor extends TimerTask {
   protected boolean debug;
   /** The hostname of the meter to be monitored. */
   protected String meterHostname;
-
   /** The client used to communicate with the WattDepot server. */
   protected WattDepotClient client;
   /** URI of Source where data will be stored. Needed to create SensorData object. */
@@ -287,22 +286,25 @@ public abstract class MultiThreadedSensor extends TimerTask {
         HammerSensor sensor =
             new HammerSensor(wattDepotUri, wattDepotUsername, wattDepotPassword, s, debug);
         if (sensor.isValid()) {
-          System.out.format("Started polling %s meter at %s%n", s.getKey(), Tstamp.makeTimestamp());
-          t.schedule(sensor, 0, sensor.getUpdateRate() * 1000);
+          System.out.println("Started polling " +s.getKey()
+              + " meter at " + Tstamp.makeTimestamp());
+          t.schedule(sensor, 0, 0);
           aSensorPolling = true;
         }
         else {
-          System.err.format("Cannot poll %s meter%n", s.getKey());
+          System.err.println("Cannot poll " + s.getKey() + " meter");
         }
       }
+      
       else {
         System.err.format("Unsupported sensor type %s%nCannot poll %s meter%n", s.getMeterType(),
             s.getKey());
+        System.out.println(s.getMeterType());
         return false;
       }
       // Prevent thundering herd by sleeping for 1.1 seconds between sensor instantiations
       // but skip sleep for HammerSensor
-      if (!SensorSource.METER_TYPE.HAMMER.equals(type)) {
+      if (!(SensorSource.METER_TYPE.HAMMER.equals(type))) {
         Thread.sleep(1100);
       }
     }
