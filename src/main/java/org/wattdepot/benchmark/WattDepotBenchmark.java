@@ -31,11 +31,11 @@ public final class WattDepotBenchmark extends Thread {
     /** The WattDepot Server to use. **/
     private static Server server;
     /** Number of threads to use. **/
-    private static int numThreads = 0;
+    private int numThreads = 0;
     /** Number of ms to run for. **/
-    private static long ttl = 0;
+    private long ttl = 0;
     /** Name of the enum command to run.**/
-    private static String commandName;
+    private String commandName;
     /** Literal used to convert from decimal to percentage. **/
     private static final int HUNDRED = 100;
    /**
@@ -100,7 +100,7 @@ public final class WattDepotBenchmark extends Thread {
     /** Prints the results of the test to the screen and a dump file.
      * @param result The Hashtable given by the Benchmark test object.
      */
-    private static void printResults(final Hashtable<String, Long> result) {
+    private void printResults(final Hashtable<String, Long> result) {
       double requests = result.get("requestCount");
       double errors = result.get("errorCount");
       NumberFormat nf = NumberFormat.getInstance();

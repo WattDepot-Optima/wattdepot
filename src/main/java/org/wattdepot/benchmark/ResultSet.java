@@ -9,9 +9,9 @@ import java.util.Hashtable;
  */
 public class ResultSet {
   /** The number of successful HTTP requests. **/
-  private static long success = 0;
+  private long success = 0;
   /** The number of errors generated. **/
-  private static long errors = 0;
+  private long errors = 0;
 
   /**
    * Initializes ResultSet to 0.
