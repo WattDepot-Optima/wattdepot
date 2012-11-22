@@ -24,6 +24,8 @@ public class WattDepotClientThread extends Thread {
   private WattDepotEnum method;
   /** Object to hold result set. **/
   private static ResultSet result = new ResultSet();
+  /** Parameters passed in as an Object array. **/
+  private Object[] parameters;
 
   /**
    * Constructor.
@@ -34,16 +36,35 @@ public class WattDepotClientThread extends Thread {
    * @param uri The URI for the WattDepotServer.
    * @param user The username for server authentication.
    * @param password The password for server authentication.
+   * @param params Optional parameters to pass to the threads.
    */
   public WattDepotClientThread(final String uri, final String user,
       final String password, final CountDownLatch start,
-      final CountDownLatch done, final WattDepotEnum methodToExecute) {
+      final CountDownLatch done, final WattDepotEnum methodToExecute,
+      final Object... params) {
     client = new WattDepotClient(uri, user, password);
     startSignal = start;
     doneSignal = done;
     method = methodToExecute;
+    parameters = params;
   }
 
+  /**
+   * Returns a ResultSet representing the current state of execution.
+   * @return a copy of the Class's internal ResultSet.
+   * @param timeStamp The time to record for this state.
+   */
+  public static ResultSet record(final long timeStamp) {
+    return result.record(timeStamp);
+  }
+
+  /**
+   * Initializes the class for a new run.
+   */
+  public static void reset() {
+    result = new ResultSet();
+    shouldStop = false;
+  }
   /**
    * Continuously executes the method.
    */
@@ -53,7 +74,7 @@ public class WattDepotClientThread extends Thread {
     try {
       startSignal.await();
       while (!shouldStop) {
-        method.execute(result, client, (Object) null);
+        method.execute(result, client, parameters);
       }
     }
     catch (InterruptedException e) {
