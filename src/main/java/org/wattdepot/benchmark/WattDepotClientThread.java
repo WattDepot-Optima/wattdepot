@@ -77,7 +77,7 @@ public class WattDepotClientThread extends Thread {
     try {
       startSignal.await();
       while (!shouldStop) {
-        method.execute(result, client, parameters);
+        method.execute(result, client, id, parameters);
       }
     }
     catch (InterruptedException e) {

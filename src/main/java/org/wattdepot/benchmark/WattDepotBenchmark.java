@@ -242,6 +242,14 @@ public final class WattDepotBenchmark {
       createSVG(chart1, command + "_" + numThreads);
   }
 
+    /** Returns the final ResultSet from the test.
+     * @return The last ResultSet from the test.
+     */
+    public ResultSet getFinalResults() {
+      return results.get(results.size() - 1);
+    }
+
+
     /**
      * Does the required setup for the test to run.
      */

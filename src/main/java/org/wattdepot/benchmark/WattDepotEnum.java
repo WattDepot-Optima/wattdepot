@@ -16,11 +16,12 @@ public enum WattDepotEnum {
        * @param result The ResultSet object in which to store results.
        * @param client The WattDepotClient object to use.
        * @param parameters Parameters required by the specific WattDepotClient
+       * @param id Used for accessing arrays.
        *  command.
        */
       @Override
       public void execute(final ResultSet result, final WattDepotClient client,
-          final Object... parameters) {
+          final int id, final Object... parameters) {
         boolean check = client.isHealthy();
         if (check) {
           result.succes();
@@ -50,10 +51,11 @@ public enum WattDepotEnum {
      * @param client The WattDepotClient object to use.
      * @param parameters Parameters required by the specific WattDepotClient
      *  command.
+     *  @param id Used for accessing arrays.
      */
       @Override
       public void execute(final ResultSet result, final WattDepotClient client,
-          final Object... parameters) {
+          final int id, final Object... parameters) {
         // TODO Auto-generated method stub
       }
 
@@ -74,9 +76,10 @@ public enum WattDepotEnum {
    * @param client The WattDepotClient object to use.
    * @param parameters Parameters required by the specific WattDepotClient
    *  command.
+   *  @param id Used for accessing arrays.
    */
   public abstract void execute(ResultSet result, WattDepotClient client,
-      Object... parameters);
+      final int id, Object... parameters);
 
   /**
    * Performs any required setup to run a test, returning
