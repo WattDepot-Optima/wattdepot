@@ -115,12 +115,14 @@ public final class WattDepotBenchmark {
       CountDownLatch startSignal = new CountDownLatch(1);
       CountDownLatch doneSignal = new CountDownLatch(numThreads);
       WattDepotClientThread[] threads = new WattDepotClientThread[numThreads];
+      //Do any required setup for the specific test.
+      Object[] setupObjects = command.setup();
 
       System.out.println("Creating Threads...");
       for (int i = 0; i < numThreads; i++) {
         threads[i] = new WattDepotClientThread(mServerURI, mServerUser,
             mServerPwd, startSignal, doneSignal,
-            command);
+            command, i, setupObjects);
         threads[i].start();
       }
       System.out.println("Starting threads...");

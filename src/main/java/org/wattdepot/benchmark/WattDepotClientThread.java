@@ -26,6 +26,8 @@ public class WattDepotClientThread extends Thread {
   private static ResultSet result = new ResultSet();
   /** Parameters passed in as an Object array. **/
   private Object[] parameters;
+  /** Thread's ID. **/
+  private int id;
 
   /**
    * Constructor.
@@ -41,12 +43,13 @@ public class WattDepotClientThread extends Thread {
   public WattDepotClientThread(final String uri, final String user,
       final String password, final CountDownLatch start,
       final CountDownLatch done, final WattDepotEnum methodToExecute,
-      final Object... params) {
+      final int ID, final Object... params) {
     client = new WattDepotClient(uri, user, password);
     startSignal = start;
     doneSignal = done;
     method = methodToExecute;
     parameters = params;
+    id = ID;
   }
 
   /**
@@ -78,7 +81,7 @@ public class WattDepotClientThread extends Thread {
       }
     }
     catch (InterruptedException e) {
-      System.out.println("Thread " + this.client + " has been interrupted");
+      System.out.println("Thread " + id + " has been interrupted");
     }
      doneSignal.countDown();
   }

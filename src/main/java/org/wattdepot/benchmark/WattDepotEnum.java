@@ -29,6 +29,15 @@ public enum WattDepotEnum {
           result.error();
         }
       }
+
+      /**
+       * Does nothing, Health_check is simple.
+       * @return Nothing!
+       */
+      @Override
+      public Object[] setup() {
+        return null;
+      }
   },
 
   /**
@@ -47,6 +56,16 @@ public enum WattDepotEnum {
           final Object... parameters) {
         // TODO Auto-generated method stub
       }
+
+      /**
+       * Does things!
+       * @return Something!
+       */
+    @Override
+    public Object[] setup() {
+      // TODO Auto-generated method stub
+      return null;
+    }
   };
 
   /**
@@ -58,4 +77,11 @@ public enum WattDepotEnum {
    */
   public abstract void execute(ResultSet result, WattDepotClient client,
       Object... parameters);
+
+  /**
+   * Performs any required setup to run a test, returning
+   * any required objects.  Used by the WattDepotBenchmark class.
+   * @return An array of objects that an execute() method might need.
+   */
+  public abstract Object[] setup();
 }
