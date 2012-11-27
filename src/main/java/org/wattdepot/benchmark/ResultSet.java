@@ -46,7 +46,7 @@ public class ResultSet {
   /**
    * Synchronized method to increment number of successes.
    */
-  public final synchronized void succes() {
+  public final synchronized void success() {
     success++;
   }
 

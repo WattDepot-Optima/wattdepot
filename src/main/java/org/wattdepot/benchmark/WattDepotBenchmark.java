@@ -42,6 +42,10 @@ public final class WattDepotBenchmark {
     private static String mServerUser = "foo@example.com";
     /** Default Wattdepot server Password. **/
     private static String mServerPwd = "CHANGE-ME";
+    /** The Sensor Name constant. **/
+    private static String sensorName = "BenchmarkSensor";
+    /** The Source Name constant. **/
+    private static String sourceName = "BenchmarkSource";
     /** The client the test will use to construct sources. **/
     private static WattDepotClient client;
     /** The WattDepot Server to use. **/
@@ -60,17 +64,19 @@ public final class WattDepotBenchmark {
     private ArrayList<ResultSet> results;
     /** The path to the folder to print to. **/
     private String dir;
+    /** Hashtable containing config information. **/
+    private Hashtable<String, String> params;
 
    /**
    * Executes the benchmark.
    * @param cmdName String representing the WattDepotEnum command
    * to execute.
-   * @param params Hashtable with various optional parameters.
+   * @param parameters Hashtable with various optional parameters.
    * @throws Exception If something goes wrong with initializing
    *                     the server.
    */
     public WattDepotBenchmark(final String cmdName,
-        final Hashtable<String, String> params) throws Exception {
+        final Hashtable<String, String> parameters) throws Exception {
       try {
         command = WattDepotEnum.valueOf(cmdName);
       }
@@ -78,6 +84,7 @@ public final class WattDepotBenchmark {
         System.err.println("Invalid Command \"" + cmdName + "\".");
         System.exit(1);
       }
+      params = parameters;
       results = new ArrayList<ResultSet>();
       dir = System.getProperty("user.home") + "\\benchmark\\"
       + command + "\\";
@@ -116,7 +123,7 @@ public final class WattDepotBenchmark {
       CountDownLatch doneSignal = new CountDownLatch(numThreads);
       WattDepotClientThread[] threads = new WattDepotClientThread[numThreads];
       //Do any required setup for the specific test.
-      Object[] setupObjects = command.setup();
+      Object[] setupObjects = command.setup(client, numThreads, params);
 
       System.out.println("Creating Threads...");
       for (int i = 0; i < numThreads; i++) {
@@ -142,7 +149,7 @@ public final class WattDepotBenchmark {
       currentTime = startUp;
       while (currentTime < timeToLive) {
         //Record results
-        System.out.println("Recording..." + currentTime);
+        System.out.println("Recording " + currentTime + "ms...");
         results.add(WattDepotClientThread.record(currentTime));
         currentTime += pollPeriod;
         //wait
@@ -172,6 +179,7 @@ public final class WattDepotBenchmark {
       //Teardown & reset for the next test
       WattDepotClientThread.reset();
       //Shutdown server
+      System.out.println("Waiting for WDserver to shutdown...");
       try {
         server.shutdown();
       }
@@ -354,5 +362,21 @@ public final class WattDepotBenchmark {
       catch (SVGGraphics2DIOException e) {
         e.printStackTrace();
       }
+    }
+
+    /**
+     * Returns the Sensor Name constant.
+     * @return The Sensor Name constant
+     */
+    public static String getSensorName() {
+      return sensorName;
+    }
+
+    /**
+     * Returns the Source Name constant.
+     * @return The Source Name constant.
+     */
+    public static String getSourceName() {
+      return sourceName;
     }
 }

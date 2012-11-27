@@ -28,6 +28,8 @@ public class WattDepotClientThread extends Thread {
   private Object[] parameters;
   /** Thread's ID. **/
   private int id;
+  /** Number of times a thread has executed. **/
+  private int numExecutions;
 
   /**
    * Constructor.
@@ -39,6 +41,7 @@ public class WattDepotClientThread extends Thread {
    * @param user The username for server authentication.
    * @param password The password for server authentication.
    * @param params Optional parameters to pass to the threads.
+   * @param id The thread's ID.
    */
   public WattDepotClientThread(final String uri, final String user,
       final String password, final CountDownLatch start,
@@ -50,6 +53,7 @@ public class WattDepotClientThread extends Thread {
     method = methodToExecute;
     parameters = params;
     id = ID;
+    numExecutions = 0;
   }
 
   /**
@@ -77,7 +81,8 @@ public class WattDepotClientThread extends Thread {
     try {
       startSignal.await();
       while (!shouldStop) {
-        method.execute(result, client, id, parameters);
+        method.execute(result, client, id, numExecutions, parameters);
+        numExecutions++;
       }
     }
     catch (InterruptedException e) {

@@ -9,7 +9,6 @@ import java.util.Hashtable;
  *
  */
 public final class TestRun {
-
   /** Private constructor for Checkstyle.
    */
   private TestRun() {
@@ -26,12 +25,12 @@ public final class TestRun {
     table.put("timeToLive",  "5000");
     table.put("pollPeriod", "1000");
     table.put("startUp", "0");
-    WattDepotBenchmark benchmark = new WattDepotBenchmark("HEALTH_CHECK",
+    WattDepotBenchmark benchmark = new WattDepotBenchmark("ADD_SENSOR_DATA",
         table);
     benchmark.run();
-    table.put("numThreads", "20");
+    /*table.put("numThreads", "20");
     benchmark = new WattDepotBenchmark("HEALTH_CHECK",
         table);
-    benchmark.run();
+    benchmark.run();*/
   }
 }
