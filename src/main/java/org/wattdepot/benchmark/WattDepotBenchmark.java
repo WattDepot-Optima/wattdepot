@@ -10,6 +10,7 @@ import java.io.OutputStreamWriter;
 import java.io.UnsupportedEncodingException;
 import java.io.Writer;
 import java.util.ArrayList;
+import java.util.Enumeration;
 import java.util.Hashtable;
 import java.util.concurrent.CountDownLatch;
 import org.apache.batik.dom.GenericDOMImplementation;
@@ -84,7 +85,16 @@ public final class WattDepotBenchmark {
         System.err.println("Invalid Command \"" + cmdName + "\".");
         System.exit(1);
       }
-      params = parameters;
+      //Deeply clone the hashtable, as Findbugs says simply assigning
+      //it is a big security breach...
+      params = new Hashtable<String, String>();
+      Enumeration <String> keys = parameters.keys();
+      String next = "";
+      while (keys.hasMoreElements()) {
+        next = keys.nextElement();
+        params.put(next, parameters.get(next));
+      }
+
       results = new ArrayList<ResultSet>();
       dir = System.getProperty("user.home") + "\\benchmark\\"
       + command + "\\";
@@ -198,10 +208,10 @@ public final class WattDepotBenchmark {
       long timestamp = 0;
       final XYSeries successSeries = new XYSeries("Successes");
       final XYSeries errorSeries = new XYSeries("\nErrors");
-      String toReturn = "Results:";
+      StringBuffer toReturn = new StringBuffer();
       Hashtable<String, Long> temp;
 
-
+      toReturn.append("Results:");
       for (ResultSet rslt : results) {
         temp = rslt.getResults();
         successes = temp.get("requestCount");
@@ -211,21 +221,23 @@ public final class WattDepotBenchmark {
         successSeries.add(timestamp, successes);
         errorSeries.add(timestamp, errors);
 
-        toReturn += "\nTime: ";
-        toReturn += timestamp;
-        toReturn += "ms\nSuccess: ";
-        toReturn += successes;
-        toReturn += "\nErrors: ";
-        toReturn +=  errors;
-        toReturn += "\n";
+        toReturn.append("\nTime: ");
+        toReturn.append(timestamp);
+        toReturn.append("ms\nSuccess: ");
+        toReturn.append(successes);
+        toReturn.append("\nErrors: ");
+        toReturn.append(errors);
+        toReturn.append("\n");
       }
 
       //Print text results
       System.out.println(toReturn);
 
       try {
-        new File(dir).mkdirs();
-
+        boolean newDir = new File(dir).mkdirs();
+        if (newDir) {
+          System.out.println("Creating directory " + dir);
+        }
         System.out.println("Writing output to "
             + dir);
         FileWriter fstream = new FileWriter(
@@ -233,7 +245,7 @@ public final class WattDepotBenchmark {
         BufferedWriter out = new BufferedWriter(fstream);
         out.write(command + " Benchmark");
         out.newLine();
-        out.write(toReturn);
+        out.write(toReturn.toString());
         out.newLine();
         out.close();
       }
