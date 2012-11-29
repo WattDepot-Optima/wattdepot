@@ -134,11 +134,12 @@ public final class WattDepotBenchmark {
       WattDepotClientThread[] threads = new WattDepotClientThread[numThreads];
       //Do any required setup for the specific test.
       Object[] setupObjects = command.setup(client, numThreads, params);
-
+      params.put("uri", mServerURI);
+      params.put("user", mServerUser);
+      params.put("password", mServerPwd);
       System.out.println("Creating Threads...");
       for (int i = 0; i < numThreads; i++) {
-        threads[i] = new WattDepotClientThread(mServerURI, mServerUser,
-            mServerPwd, startSignal, doneSignal,
+        threads[i] = new WattDepotClientThread(params, startSignal, doneSignal,
             command, i, setupObjects);
         threads[i].start();
       }
