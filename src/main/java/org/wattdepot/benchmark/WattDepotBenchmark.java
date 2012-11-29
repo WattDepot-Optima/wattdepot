@@ -105,6 +105,11 @@ public final class WattDepotBenchmark {
           timeToLive = new Long(ttl);
           System.out.println("Setting timeToLive to: " + ttl);
         }
+        if (params.containsKey("dir")) {
+          dir = params.get("dir");
+          String d = params.get("dir");
+          System.out.println("Setting output directory to: " + d);
+        }
         if (params.containsKey("startUp")) {
           String strt = params.get("startUp");
           startUp = new Long(strt);
@@ -258,9 +263,9 @@ public final class WattDepotBenchmark {
       final XYSeriesCollection dataset1 = new XYSeriesCollection();
       dataset1.addSeries(successSeries);
       dataset1.addSeries(errorSeries);
-      JFreeChart chart1 = createChart("HTTP Requests vs Time",
+      JFreeChart chart1 = Parser.createChart("HTTP Requests vs Time",
           "Time (ms)", "#Requests", dataset1);
-      createSVG(chart1, command + "_" + numThreads);
+      Parser.createSVG(chart1, command + "_" + numThreads, dir);
   }
 
     /** Returns the final ResultSet from the test.
@@ -311,71 +316,7 @@ public final class WattDepotBenchmark {
         }
     }
 
-    /** Creates a Chart object.
-     * @param title Title of the chart.
-     * @param xAxisLabel Label for x axis.
-     * @param yAxisLabel Label for y axis.
-     * @param dataset Dataset to add to graph.
-     * @return A Chart object.
-     */
-    private JFreeChart createChart(final String title,
-        final String xAxisLabel, final String yAxisLabel,
-        final XYSeriesCollection dataset) {
-      final JFreeChart chart = ChartFactory.createXYLineChart(
-          title,      // chart title
-          xAxisLabel,                      // x axis label
-          yAxisLabel,                      // y axis label
-          dataset,                  // data
-          PlotOrientation.VERTICAL,
-          true,                     // include legend
-          true,                     // tooltips
-          false                     // urls
-      );
-      return chart;
-    }
-
-    /**
-     * Creates and prints an SVG representation of the chart.
-     * @param chart Chart to print.
-     * @param name File name of the chart.
-     */
-    private void createSVG(final JFreeChart chart, final String name) {
-      // THE FOLLOWING CODE BASED ON THE EXAMPLE IN THE BATIK DOCUMENTATION...
-      // Get a DOMImplementation
-      DOMImplementation domImpl
-          = GenericDOMImplementation.getDOMImplementation();
-
-      // Create an instance of org.w3c.dom.Document
-      Document document = domImpl.createDocument(null, "svg", null);
-
-      // Create an instance of the SVG Generator
-      SVGGraphics2D svgGenerator = new SVGGraphics2D(document);
-
-      // set the precision to avoid a null pointer exception in Batik 1.5
-      svgGenerator.getGeneratorContext().setPrecision(6);
-
-      // Ask the chart to render into the SVG Graphics2D implementation
-      chart.draw(svgGenerator, new Rectangle2D.Double(0, 0, 400, 300), null);
-
-      // Finally, stream out SVG to a file using UTF-8 character to
-      // byte encoding
-      boolean useCSS = true;
-      Writer out;
-      try {
-        out = new OutputStreamWriter(
-            new FileOutputStream(new File(dir + name + ".svg")), "UTF-8");
-            svgGenerator.stream(out, useCSS);
-      }
-      catch (UnsupportedEncodingException e) {
-        e.printStackTrace();
-      }
-      catch (FileNotFoundException e) {
-        e.printStackTrace();
-      }
-      catch (SVGGraphics2DIOException e) {
-        e.printStackTrace();
-      }
-    }
+  
 
     /**
      * Returns the Sensor Name constant.
