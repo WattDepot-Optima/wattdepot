@@ -159,22 +159,7 @@
 		<artifactId>org.restlet</artifactId>  
 		<version>${restlet.version}</version>  
 	</dependency>
-<!--   <dependency> -->
-<!--     <groupId>org.restlet.jse</groupId> -->
-<!--     <artifactId>org.restlet.ext.jetty</artifactId> -->
-<!--     <version>${restlet.version}</version> -->
-<!--   </dependency> -->
-<!--   <dependency> -->
-<!--     <groupId>org.restlet.jse</groupId> -->
-<!--     <artifactId>org.restlet.ext.simple</artifactId> -->
-<!--     <version>${restlet.version}</version> -->
-<!--   </dependency> -->
-<!--   <dependency> -->
-<!--     <groupId>org.restlet.jse</groupId> -->
-<!--     <artifactId>org.restlet.ext.net</artifactId> -->
-<!--     <version>${restlet.version}</version> -->
-<!--   </dependency> -->
-  <dependency>
+     <dependency>
 		<groupId>net.wimpi.modbus</groupId>
 		<artifactId>jamod</artifactId>
 		<version>${modbus-jamod.version}</version>
@@ -566,7 +551,7 @@
 						<assembleDirectory>target</assembleDirectory>
 						<programs>
 							<program>
-								<mainClass>org.wattdepot.server.Server</mainClass>
+								<mainClass>org.wattdepot.benchmark.TestRun</mainClass>
 								<name>webapp</name>
 							</program>
 						</programs>
@@ -574,34 +559,6 @@
 				</execution>
 			</executions>
 		</plugin>
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>exec-maven-plugin</artifactId>
-                <version>1.2.1</version>
-                <configuration>
-                    <mainClass>org.wattdepot.benchmark.Benchmarker</mainClass>
-          <arguments>
-				<!--@UserBenchmark :: # iterations-->
-			<argument>100</argument>
-
-				<!--@SensorServerBenchmark :: #threads-->
-			<argument>100</argument>
-
-				<!--@SensorServerBenchmark :: durration(ms)-->
-			<argument>10000</argument>
-
-				<!--@DBStress :: #iterations to run-->
-			<argument>1000</argument>
-
-				<!--@DBStress timestamp :: interval(ms)-->
-			<argument>15000</argument>
-
-				<!--@DBStress :: # pieces of data to store-->
-			<argument>10</argument>
-
-          </arguments>
-                </configuration>
-            </plugin>
 	</plugins>
 </build>
 </project>

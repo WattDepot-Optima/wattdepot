@@ -37,22 +37,24 @@ public class WattDepotClientThread extends Thread {
    * @param done A countDownLatch to notify the calling thread that this thread
    * is done executing.
    * @param methodToExecute A WattDeotEnum holding the method to execute.
-   * @param uri The URI for the WattDepotServer.
-   * @param user The username for server authentication.
-   * @param password The password for server authentication.
+   * @param table A Hashtable containing values for "uri","server", and
+   * "password".
    * @param params Optional parameters to pass to the threads.
-   * @param id The thread's ID.
+   * @param idNum The thread's ID.
    */
-  public WattDepotClientThread(final String uri, final String user,
-      final String password, final CountDownLatch start,
+  public WattDepotClientThread(final Hashtable<String, String> table,
+      final CountDownLatch start,
       final CountDownLatch done, final WattDepotEnum methodToExecute,
-      final int ID, final Object... params) {
-    client = new WattDepotClient(uri, user, password);
+      final int idNum, final Object... params) {
+    client = new WattDepotClient(
+        table.get("uri"),
+        table.get("user"),
+        table.get("password"));
     startSignal = start;
     doneSignal = done;
     method = methodToExecute;
     parameters = params;
-    id = ID;
+    id = idNum;
     numExecutions = 0;
   }
 
@@ -81,7 +83,7 @@ public class WattDepotClientThread extends Thread {
     try {
       startSignal.await();
       while (!shouldStop) {
-        method.execute(result, client, id, numExecutions, parameters);
+        method.execute(result, client, numExecutions, id, parameters);
         numExecutions++;
       }
     }
