@@ -9,11 +9,11 @@ import java.util.Hashtable;
  */
 public class ResultSet {
   /** The number of successful HTTP requests. **/
-  private long success = 0;
+  private long success;
   /** The number of errors generated. **/
-  private long errors = 0;
+  private long errors;
   /** The time since the test started. **/
-  private long time = 0;
+  private long time;
 
   /**
    * Initializes ResultSet to 0.
@@ -65,7 +65,7 @@ public class ResultSet {
    * contains the number of successful (non-erroneous)
    * requests.
    */
-  public final Hashtable<String, Long> getResults() {
+  public final synchronized Hashtable<String, Long> getResults() {
     Hashtable<String, Long> dict = new Hashtable<String, Long>();
     dict.put("errorCount", errors);
     dict.put("requestCount", success);

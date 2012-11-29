@@ -4,6 +4,8 @@ import java.util.Hashtable;
 import java.util.List;
 import java.util.Random;
 import javax.xml.datatype.XMLGregorianCalendar;
+
+import org.wattdepot.benchmark.ResultSet;
 import org.wattdepot.client.OverwriteAttemptedException;
 import org.wattdepot.client.WattDepotClient;
 import org.wattdepot.resource.property.jaxb.Property;
@@ -62,7 +64,243 @@ public enum WattDepotEnum {
         return null;
       }
   },
+  
+  /**
+   * Implements the GET_POWER() command.
+   */
+  GET_POWER() {
+	    /**
+	     * The command-specific implementation.
+	     * @param result The ResultSet object in which to store results.
+	     * @param client The WattDepotClient object to use.
+	     * @param parameters Parameters required by the specific WattDepotClient
+	     *  command.
+	     *  @param id Used for accessing arrays.
+	     */
+	  	@Override
+	    public void execute(final ResultSet result, final WattDepotClient client,
+	          final int numExecutions, final int id, final Object... parameters) {
+	  		 String[][] timestamps = null;
+	         try {
+	           timestamps = (String[][]) parameters;
+	         }
+	         catch (Exception e) {
+	           System.out.println("Error parsing parameter list.");
+	           e.printStackTrace();
+	         }
+	         try {
+	           String[] timestamp = timestamps[id];
+	           int size = timestamp.length;
+	           Random rand = new Random();
+	           int lowerBound = rand.nextInt(size);
+	           client.getSensorData(WattDepotBenchmark.getSourceName() + id, 
+	        		   Tstamp.makeTimestamp(timestamp[lowerBound]));
+	           client.getPower(WattDepotBenchmark.getSourceName() + id, 
+	        		   Tstamp.makeTimestamp(timestamp[lowerBound]));
+	   
+	           result.success();
+	         }
+	         catch (Exception e) {
+	           result.error();
+	         }
+	      }
 
+	      /**
+	       * Does things!
+	       * @return Something!
+	       */
+	    @Override
+	    public Object[] setup(final WattDepotClient client, final int numThreads,
+	            final Hashtable<String, String> params) {
+	    	  WattDepotEnum.GET_SENSOR_DATA_FROM_SOURCE.setup(client, numThreads, params);
+	          return null;
+	        }
+	  },
+  
+  /**
+   * Implements the getEnergy() command.
+   */
+  GET_ENERGY() {
+	    /**
+	     * The command-specific implementation.
+	     * @param result The ResultSet object in which to store results.
+	     * @param client The WattDepotClient object to use.
+	     * @param parameters Parameters required by the specific WattDepotClient
+	     *  command.
+	     *  @param id Used for accessing arrays.
+	     */
+	  	@Override
+	    public void execute(final ResultSet result, final WattDepotClient client,
+	          final int numExecutions, final int id, final Object... parameters) {
+	  		 String[][] timestamps = null;
+	         try {
+	           timestamps = (String[][]) parameters;
+	         }
+	         catch (Exception e) {
+	           System.out.println("Error parsing parameter list.");
+	           e.printStackTrace();
+	         }
+	         try {
+	           String[] timestamp = timestamps[id];
+	           int size = timestamp.length;
+	           int userInterval = 10000;
+	           Random rand = new Random();
+	           int lowerBound = rand.nextInt(size);
+	           int upperBound = rand.nextInt(size - lowerBound) + lowerBound;
+	           client.getSensorDataIndex(WattDepotBenchmark.getSourceName() + id,
+	               Tstamp.makeTimestamp(timestamp[lowerBound]),
+	               Tstamp.makeTimestamp(timestamp[upperBound]));
+	           client.getEnergy(WattDepotBenchmark.getSourceName() + id, 
+	        		   Tstamp.makeTimestamp(timestamp[lowerBound]), 
+	        		   Tstamp.makeTimestamp(timestamp[upperBound]), 
+	        		   userInterval);
+	           result.success();
+	         }
+	         catch (Exception e) {
+	           result.error();
+	         }
+	      }
+
+	      /**
+	       * Does things!
+	       * @return Something!
+	       */
+	    @Override
+	    public Object[] setup(final WattDepotClient client, final int numThreads,
+	            final Hashtable<String, String> params) {
+	    	  WattDepotEnum.GET_SENSOR_DATA_FROM_SOURCE.setup(client, numThreads, params);
+	          return null;
+	        }
+	  },
+	  
+	  /**
+	   * Implements the PUT_USER() command.
+	   */
+	  PUT_USER() {
+		    /**
+		     * The command-specific implementation.
+		     * @param result The ResultSet object in which to store results.
+		     * @param client The WattDepotClient object to use.
+		     * @param parameters Parameters required by the specific WattDepotClient
+		     *  command.
+		     *  @param id Used for accessing arrays.
+		     */
+		  @Override
+		    public void execute(final ResultSet result, final WattDepotClient client,
+		          final int numExecutions, final int id, final Object... parameters) {
+		    }
+
+		    @Override
+		    /** Run a Benchmark to add the necessary number of sources.
+		     * One source is added for each thread used in the test.
+		     * @param client The WattDepotClient object to use.
+		     * @param numThreads The number of threads to be used by the
+		     * benchmark; indicates the number of objects to setup.
+		     */
+		    public Object[] setup(final WattDepotClient client, final int numThreads,
+		        final Hashtable<String, String> params) {
+		    	String userName = "foo@example.com";
+		      User user = new User(userName, "foobar", true, null);
+
+		      try {
+		        client.storeUser(user);
+		      }
+		      catch (OverwriteAttemptedException e1) {
+		        System.out.println("User already stored, continuing.");
+		      }
+		      catch (Exception e1) {
+		        System.out.println("Error in setup");
+		        e1.printStackTrace();
+		        System.exit(1);
+		      }
+		      return null;
+		    }
+
+		  },
+		  
+		  /**
+		   * Implements the PUT_USER() command.
+		   */
+		  GET_USER() {
+			    /**
+			     * The command-specific implementation.
+			     * @param result The ResultSet object in which to store results.
+			     * @param client The WattDepotClient object to use.
+			     * @param parameters Parameters required by the specific WattDepotClient
+			     *  command.
+			     *  @param id Used for accessing arrays.
+			     */
+			  	@Override
+			    public void execute(final ResultSet result, final WattDepotClient client,
+			          final int numExecutions, final int id, final Object... parameters) {
+			  		//String userName = (string)parameters;
+			  		//client.getUser(userName);
+			      }
+
+			      /**
+			       * Does things!
+			       * @return Something!
+			       */
+			    @Override
+			    public Object[] setup(final WattDepotClient client, final int numThreads,
+			            final Hashtable<String, String> params) {
+			    	  WattDepotEnum.PUT_USER.setup(client, numThreads, params);
+				          return null;
+				        }
+			  },
+		  
+		  GET_CARBON() {
+			    /**
+			     * The command-specific implementation.
+			     * @param result The ResultSet object in which to store results.
+			     * @param client The WattDepotClient object to use.
+			     * @param parameters Parameters required by the specific WattDepotClient
+			     *  command.
+			     *  @param id Used for accessing arrays.
+			     */
+			  	@Override
+			    public void execute(final ResultSet result, final WattDepotClient client,
+			          final int numExecutions, final int id, final Object... parameters) {
+			  		 String[][] timestamps = null;
+			         try {
+			           timestamps = (String[][]) parameters;
+			         }
+			         catch (Exception e) {
+			           System.out.println("Error parsing parameter list.");
+			           e.printStackTrace();
+			         }
+			         try {
+			           String[] timestamp = timestamps[id];
+			           int size = timestamp.length;
+			           int userInterval = 10000;
+			           Random rand = new Random();
+			           int lowerBound = rand.nextInt(size);
+			           int upperBound = rand.nextInt(size - lowerBound) + lowerBound;
+			           client.getSensorDataIndex(WattDepotBenchmark.getSourceName() + id,
+			               Tstamp.makeTimestamp(timestamp[lowerBound]),
+			               Tstamp.makeTimestamp(timestamp[upperBound]));
+			           client.getCarbon(WattDepotBenchmark.getSourceName() + id, 
+			        		   Tstamp.makeTimestamp(timestamp[lowerBound]), 
+			        		   Tstamp.makeTimestamp(timestamp[upperBound]), 
+			        		   userInterval);
+			           result.success();
+			         }
+			         catch (Exception e) {
+			           result.error();
+			         }
+			      }
+
+			      /**
+			       * Does things!
+			       * @return Something!
+			       */
+			    @Override
+			    public Object[] setup(final WattDepotClient client, final int numThreads,
+			            final Hashtable<String, String> params) {
+			    	  WattDepotEnum.GET_SENSOR_DATA_FROM_SOURCE.setup(client, numThreads, params);
+			          return null;
+			        }
+			  },
   /** Implements the store(SensorData) command on a WattDepotClient.
    */
   ADD_SENSOR_DATA() {
@@ -114,7 +352,6 @@ public enum WattDepotEnum {
      * @param client The WattDepotClient object to use.
      * @param numThreads The number of threads to be used by the
      * benchmark; indicates the number of objects to setup.
-     *
      */
     public Object[] setup(final WattDepotClient client, final int numThreads,
         final Hashtable<String, String> params) {
@@ -311,6 +548,7 @@ public enum WattDepotEnum {
       //Runs an ADD_SENSOR_DATA benchmark to populate the DB
       WattDepotEnum.GET_SENSOR_DATA_FROM_SOURCE.setup(client, numThreads,
           params);
+      
 
       String[][] timestamps = new String [numThreads][];
       String sourceName = WattDepotBenchmark.getSourceName();

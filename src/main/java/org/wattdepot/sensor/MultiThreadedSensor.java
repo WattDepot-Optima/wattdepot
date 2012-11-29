@@ -286,7 +286,7 @@ public abstract class MultiThreadedSensor extends TimerTask {
         HammerSensor sensor =
             new HammerSensor(wattDepotUri, wattDepotUsername, wattDepotPassword, s, debug);
         if (sensor.isValid()) {
-          System.out.println("Started polling " +s.getKey()
+          System.out.println("Started polling " + s.getKey()
               + " meter at " + Tstamp.makeTimestamp());
           t.schedule(sensor, 0, 0);
           aSensorPolling = true;
