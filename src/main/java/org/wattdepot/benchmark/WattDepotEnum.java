@@ -4,7 +4,11 @@ import java.util.Hashtable;
 import java.util.List;
 import java.util.Random;
 import javax.xml.datatype.XMLGregorianCalendar;
+import org.wattdepot.client.BadXmlException;
+import org.wattdepot.client.MiscClientException;
+import org.wattdepot.client.NotAuthorizedException;
 import org.wattdepot.client.OverwriteAttemptedException;
+import org.wattdepot.client.ResourceNotFoundException;
 import org.wattdepot.client.WattDepotClient;
 import org.wattdepot.resource.property.jaxb.Property;
 import org.wattdepot.resource.sensordata.jaxb.SensorData;
@@ -189,99 +193,6 @@ public enum WattDepotEnum {
           }
     },
 
-    /**
-     * Implements the PUT_USER() command.
-     */
-    PUT_USER() {
-        /**
-         * The command-specific implementation.
-         * @param result The ResultSet object in which to
-         *  store results.
-         * @param client The WattDepotClient object to use.
-         * @param parameters Parameters required by the specific
-         *  WattDepotClient
-         *  command.
-         *  @param numExecutions The number of times the
-         *  Thread has executed.
-         *  @param id Used for accessing arrays.
-         */
-      @Override
-        public void execute(final ResultSet result,
-              final WattDepotClient client,
-              final int numExecutions,
-              final int id, final Object... parameters) {
-        }
-
-        @Override
-        /** Run a Benchmark to add the necessary number of sources.
-         * One source is added for each thread used in the test.
-         * @param client The WattDepotClient object to use.
-         * @param numThreads The number of threads to be used by the
-         * benchmark; indicates the number of objects to setup.
-         */
-        public Object[] setup(final WattDepotClient client,
-            final int numThreads,
-            final Hashtable<String, String> params) {
-          String userName = "foo@example.com";
-          User user = new User(userName, "foobar", true, null);
-
-          try {
-            client.storeUser(user);
-          }
-          catch (OverwriteAttemptedException e1) {
-            System.out.println("User already stored, continuing.");
-          }
-          catch (Exception e1) {
-            System.out.println("Error in setup");
-            e1.printStackTrace();
-            System.exit(1);
-          }
-          return null;
-        }
-
-      },
-
-      /**
-       * Implements the GET_USER() command.
-       */
-      GET_USER() {
-          /**
-           * The command-specific implementation.
-           * @param result The ResultSet object in which
-           *  to store results.
-           * @param client The WattDepotClient object to use.
-           * @param parameters Parameters required by the
-           *  specific WattDepotClient
-           *  command.
-           *  @param numExecutions The number of times the
-           *  Thread has executed.
-           *  @param id Used for accessing arrays.
-           */
-          @Override
-          public void execute(final ResultSet result,
-              final WattDepotClient client,
-                final int numExecutions,
-                final int id, final Object... parameters) {
-            //String userName = (string)parameters;
-            //client.getUser(userName);
-            }
-
-            /**
-             * Does things!
-             * @param client The WattDepotClient to use.
-             * @param numThreads The number of Threads in use.
-             * @param params Misc. configuration parameters.
-             * @return Something!
-             */
-          @Override
-          public Object[] setup(final WattDepotClient client,
-              final int numThreads,
-              final Hashtable<String, String> params) {
-              WattDepotEnum.PUT_USER.setup(
-                  client, numThreads, params);
-                  return null;
-                }
-        },
 
         /** Implements the getCarbon(Source, timestamp,
          *  timestamp)
@@ -838,42 +749,6 @@ public enum WattDepotEnum {
         e.printStackTrace();
         return null;
       }
-    }
-  },
-
-  /**
-   * Example code.
-   */
-  SOLDIER() {
-    /**
-     * The command-specific implementation.
-     * @param result The ResultSet object in which to store results.
-     * @param client The WattDepotClient object to use.
-     * @param parameters Parameters required by the specific WattDepotClient
-     *  command.
-     * @param id Used for accessing arrays.
-     * @param numExecutions The number of times the thread has executed.
-     */
-      @Override
-      public void execute(final ResultSet result, final WattDepotClient client,
-          final int numExecutions, final int id, final Object... parameters) {
-        // TODO Auto-generated method stub
-      }
-
-
-      /**
-       * Does set up for the test.  Whatever is returned by this method
-       * is passed to the execute() method via it's 'parameters' parameter.
-       * @param client The WattDepotClient to use.
-       * @param numThreads The number of Threads used by this
-       * test.
-       * @param params Misc. configuration parameters.
-       * @return Something!
-       */
-    @Override
-    public Object[] setup(final WattDepotClient client, final int numThreads,
-        final Hashtable<String, String> params) {
-      return null;
     }
   };
 
