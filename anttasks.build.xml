@@ -265,10 +265,10 @@
 
 
 
-    <jar destfile="${build.jar.dir}/TestRun.jar" basedir="${tmp.dir}">
+    <jar destfile="${build.jar.dir}/WattDepotOptima.jar" basedir="${tmp.dir}">
       <manifest>
-        <attribute name="Main-Class" value="org.wattdepot.benchmark.TestRun" />
-        <attribute name="Implementation-Title" value="TestRun" />
+        <attribute name="Main-Class" value="org.wattdepot.benchmark.Parser" />
+        <attribute name="Implementation-Title" value="WattDepotOptima" />
         <attribute name="Implementation-Version" value="${build.version}" />
         <attribute name="Implementation-Vendor"
                    value="WattDepot-Optima" />

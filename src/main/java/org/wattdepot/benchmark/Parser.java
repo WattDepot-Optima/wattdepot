@@ -39,16 +39,16 @@ import java.util.Hashtable;
  */
 
 public class Parser {
-  
+
   /** The default location for config.xml. **/
-  public static String fileLoc = System.getProperty("user.home");
-  
+  private static String fileLoc = System.getProperty("user.home");
+
   /** The main driver for the benchmarking.
    *  Parses the file and runs the tests.
    *  @param args command line argument that can
    *  contain the location of the config file.
    */
-  public static void main(final String args[]) {
+  public static void main(final String[] args) {
     try {
       if (args.length > 0) {
         fileLoc = args[0];
@@ -77,8 +77,19 @@ public class Parser {
         params.put("dir", dir);
         runTest(params);
       }
-    } 
+    }
+    catch (FileNotFoundException e) {
+      System.out.println("config.xml not found in "
+          + System.getProperty("user.home"));
+      System.out.println("Please see the documentation at: ");
+      System.out.println("https://github.com/WattDepot-Optima/wattdepot/"
+          + "wiki/ConfigFile");
+    }
     catch (Exception e) {
+      System.out.println("An Error Occured in reading the config file!");
+      System.out.println("Please see the documentation at: ");
+      System.out.println("https://github.com/WattDepot-Optima/wattdepot/"
+          + "wiki/ConfigFile");
       e.printStackTrace();
     }
   }

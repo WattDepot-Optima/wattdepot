@@ -20,6 +20,7 @@ import org.wattdepot.util.tstamp.Tstamp;
  *  make HTTP requests to the WDserver.  Uses code taken from Yongwen Xu's
  *  WattExample.java.
  * @author Greg Burgess
+ * @author Keone Hirade
  * @author Yongwen Xu
  */
 
@@ -39,7 +40,7 @@ public enum WattDepotEnum {
        */
       @Override
       public void execute(final ResultSet result, final WattDepotClient client,
-          final int id, final int numExecutions, final Object... parameters) {
+          final int numExecutions, final int id, final Object... parameters) {
         boolean check = client.isHealthy();
         if (check) {
           result.success();
@@ -465,7 +466,7 @@ public enum WattDepotEnum {
      */
       @Override
       public void execute(final ResultSet result, final WattDepotClient client,
-          final int id, final int numExecutions, final Object... parameters) {
+          final int numExecutions, final int id, final Object... parameters) {
         try {
           client.getSensorDataIndex(WattDepotBenchmark.getSourceName() + id);
           result.success();
@@ -517,7 +518,7 @@ public enum WattDepotEnum {
      */
       @Override
       public void execute(final ResultSet result, final WattDepotClient client,
-          final int id, final int numExecutions, final Object... parameters) {
+          final int numExecutions, final int id, final Object... parameters) {
         try {
           client.getLatestSensorData(WattDepotBenchmark.getSourceName() + id);
           result.success();
@@ -564,7 +565,7 @@ public enum WattDepotEnum {
      */
       @Override
       public void execute(final ResultSet result, final WattDepotClient client,
-          final int id, final int numExecutions, final Object... parameters) {
+          final int numExecutions, final int id, final Object... parameters) {
         String[][] timestamps = null;
         try {
           timestamps = (String[][]) parameters;
@@ -648,7 +649,7 @@ public enum WattDepotEnum {
      */
       @Override
       public void execute(final ResultSet result, final WattDepotClient client,
-          final int id, final int numExecutions, final Object... parameters) {
+          final int numExecutions, final int id, final Object... parameters) {
         String[][] timestamps = null;
         try {
           timestamps = (String[][]) parameters;
@@ -709,7 +710,7 @@ public enum WattDepotEnum {
      */
       @Override
       public void execute(final ResultSet result, final WattDepotClient client,
-          final int id, final int numExecutions, final Object... parameters) {
+          final int numExecutions, final int id, final Object... parameters) {
         String[][] timestamps = null;
         try {
           timestamps = (String[][]) parameters;
@@ -773,7 +774,7 @@ public enum WattDepotEnum {
      */
       @Override
       public void execute(final ResultSet result, final WattDepotClient client,
-          final int id, final int numExecutions, final Object... parameters) {
+          final int numExecutions, final int id, final Object... parameters) {
         Object[] sources = (Object[]) parameters[0];
         int numThreads = (Integer) parameters[1];
         int size = sources.length;
@@ -855,13 +856,14 @@ public enum WattDepotEnum {
      */
       @Override
       public void execute(final ResultSet result, final WattDepotClient client,
-          final int id, final int numExecutions, final Object... parameters) {
+          final int numExecutions, final int id, final Object... parameters) {
         // TODO Auto-generated method stub
       }
 
 
       /**
-       * Does things!
+       * Does set up for the test.  Whatever is returned by this method
+       * is passed to the execute() method via it's 'parameters' parameter.
        * @param client The WattDepotClient to use.
        * @param numThreads The number of Threads used by this
        * test.
@@ -885,11 +887,12 @@ public enum WattDepotEnum {
    * @param numExecutions The number of times the Thread has executed.
    */
   public abstract void execute(ResultSet result, WattDepotClient client,
-      final int id, final int numExecutions, Object... parameters);
+      final int numExecutions, final int id, Object... parameters);
 
   /**
-   * Performs any required setup to run a test, returning
-   * any required objects.  Used by the WattDepotBenchmark class.
+   * Does set up for a benchmark test.  Whatever is returned by this method
+   * is passed by the system to the execute() method via it's 'parameters'
+   * parameter.
    * @param client The WattDepotClient to use.
    * @param numThreads The number of Threads used by this
    * test.
